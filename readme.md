@@ -40,8 +40,9 @@ it into the pre-compiled binary.
 
 Example command to compile Injector: `cc -o injector injector.c`
 
-To build each .a80 file: ```z80asm -o filename.bin filename.a80
-./injector filename.bin filename.rom filename.com```
+To build each .a80 file: 
+`z80asm -o filename.bin filename.a80`
+`./injector filename.bin filename.rom filename.com`
 
 Nabu's native operating system loads applications other than the menu system
 at 0x0100, the same as CP/M, so the resulting binaries are meant to be used in
@@ -57,3 +58,7 @@ work, but often because they have serious bugs and, as the saying goes, "many
 eyes make all bugs shallow."  This is not where I release finished game ports,
 but where I release unfinished ports in need of assistance, and finished ports
 will be archived for the historical record.
+
+## Games included here?
+
+`zoom909`: Zoom 909 (*a.k.a.* Buck Rogers: Planet of Zoom)
