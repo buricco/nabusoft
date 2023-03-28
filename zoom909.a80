@@ -17,7 +17,6 @@
 ;      import file>zoom909.com   (Or whatever you called the file)
 ;      import addr>0x0100
 ;      go (y/n)? y
-; Known issues: Up seems to be stuck on.
 ;
 ; For MAME:
 ;   Inject into a CP/M floppy, and boot MAME into CP/M.
@@ -26,14 +25,18 @@
 ;
 ; Other known issues:
 ;   White noise not generated.
-;   Controller emulation isn't quite complete.
+;   Controller emulation isn't quite complete (so no 2 Player mode).
 ;   Should probably alter the title screen similar to the MSX version.
 ; ----------------------------------------------------------------------------
 
           org       0x0100
 start:    jp        reloc
 
-gamecode: ds        0x8000              ; Plug game code here.
+; ============================================================================
+; Unmodified copy of a "Zoom 909" SG-1000 ROM.
+; ============================================================================
+
+gamecode: ds        32768
 
 ; ============================================================================
 ; Patch kit relocates to 0xB000, i.e., the 4K below the SG-1000's RAM space.
@@ -125,7 +128,7 @@ newirq5:  bit       2, b                ; Right
           jr        nz, newirq6
           or        0x04                ; Right
 newirq6:  bit       3, b                ; Up
-          jr        nz, newirq7
+          jr        z, newirq7
           or        0x01                ; Up
 newirq7:  pop       bc
           cpl                           ; Flip polarity (same as XOR 0xFF)
@@ -375,6 +378,13 @@ reloc:    di                            ; Make sure no interrupts interfere
           ldir
 
 ; ----------------------------------------------------------------------------
+; Disable the keyboard check routine ($0C01-0C29).
+; ----------------------------------------------------------------------------
+
+          ld        a, 0xC9             ; RET
+          ld        (0x0C01), a
+
+; ----------------------------------------------------------------------------
 ; Install patch to a function that uses OTIR to output to the SN76489.
 ; ----------------------------------------------------------------------------
 
@@ -492,106 +502,58 @@ vdpatch6: ld        a, d                ; Are we done yet?
 ; ----------------------------------------------------------------------------
 
 njoyrtn:  org       0x0B01
-L0B01:    ld        a, (0xC000)
-          and       a
-          jr        z, L0B1B
-          ld        a, (0xB000)
+L0B01:    ld        a, (joy)
           ld        b, a
           or        0xC0
           ld        c, a
           ld        a, 0xFF
-          nop
-          rl        b
-          rla       
-          rl        b
-          rla       
-          ld        b, a
-          jp        L0BAC
-L0B1B:    nop
-          nop
-          nop
-          ld        a, (0xB000)
-          ld        b, a
-          or        0xC0
-          ld        c, a
-          nop
-          nop
-          nop
-          nop
-          ld        a, 0xFF
           rl        b
           rla       
           rl        b
           rla       
           or        0xC0
           ld        b, a
-          nop
-          nop
-          nop
-          ld        a, (0xB000)
+          ld        a, (joy)
           bit       2, a
           jr        nz, L0B40
           res       2, b
 L0B40:    bit       3, a
           jr        nz, L0B46
           res       1, b
-L0B46:    nop
-          nop
-          nop
-          ld        a, (0xB000)
+L0B46:    ld        a, (joy)
           bit       1, a
           jr        nz, L0B52
           res       0, b
 L0B52:    bit       4, a
           jr        nz, L0B58
           res       4, c
-L0B58:    nop
-          nop
-          nop
-          ld        a, (0xB000)
+L0B58:    ld        a, (joy)
           bit       2, a
           jr        nz, L0B64
           res       3, b
 L0B64:    bit       4, a
           jr        nz, L0B6A
           res       5, c
-L0B6A:    nop
-          nop
-          nop
-          ld        a, (0xB000)
+L0B6A:    ld        a, (joy)
           bit       5, a
           jr        nz, L0B76
           res       1, c
-L0B76:    nop
-          nop
-          nop
-          ld        a, (0xB000)
+L0B76:    ld        a, (joy)
           bit       5, a
           jr        nz, L0B82
           res       2, c
-L0B82:    nop
-          nop
-          nop
-          ld        a, (0xB000)
+L0B82:    ld        a, (joy)
           bit       5, a
           jr        nz, L0B8E
           res       3, c
 L0B8E:    bit       6, a
           jr        nz, L0B94
           res       0, c
-L0B94:    nop
-          nop
-          nop
-          nop
-          ld        a, 0xFF
+L0B94:    ld        a, 0xFF
           bit       3, a
           jr        nz, L0BA0
           res       4, b
-L0BA0:    nop
-          nop
-          nop
-          nop
-          ld        a, 0xFF
+L0BA0:    ld        a, 0xFF
           bit       2, a
           jr        nz, L0BAC
           res       5, b
