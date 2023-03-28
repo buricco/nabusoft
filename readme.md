@@ -38,6 +38,8 @@ it into the pre-compiled binary.
 
 ## How do I use these wrappers?
 
+### SG-1000
+
 Example command to compile Injector: `cc -o injector injector.c`
 
 To build each .a80 file: 
@@ -45,6 +47,15 @@ To build each .a80 file:
 `z80asm -o filename.bin filename.a80`
 
 `./injector filename.bin filename.rom filename.com`
+
+### MSX
+
+Build the .a80 as above.
+
+On Windows, `copy /b filename.bin+filename.rom filename.com`
+
+On anything remotely resembling Unix,
+`cat filename.bin filename.rom > filename.com`
 
 Nabu's native operating system loads applications other than the menu system
 at 0x0100, the same as CP/M, so the resulting binaries are meant to be used in
@@ -63,13 +74,15 @@ will be archived for the historical record.
 
 ## Games included here?
 
+`warpwarp`: Galaxian, Tank Battalion, Warp & Warp (same stub for all 3)
 `zoom909`: Zoom 909 (*a.k.a.* Buck Rogers: Planet of Zoom)
 
 ## Other stuff included here?
 
 `deadwait`: Fake ROM that copies itself to RAM and then waits for an external
 source to DMA a CP/M command into place.  Quicker than loading a complete copy
-of [OpenNabu IPL](https://github.com/buricco/opennabuipl).
+of [OpenNabu IPL](https://github.com/buricco/opennabuipl).  (More recently
+obviated because I added a *special switch* `-x` to Marduk.)
 
 ## Third-party games?
 

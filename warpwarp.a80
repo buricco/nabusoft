@@ -1,0 +1,196 @@
+; ============================================================================
+; Galaxian:       Copyright 1979, 1984 Bandai Namco Entertainment Inc.
+; Tank Battalion: Copyright 1980, 1984 Bandai Namco Entertainment Inc.
+; Warp & Warp:    Copyright 1981, 1984 Bandai Namco Entertainment Inc.
+; Nabu conversion by S. V. Nickolas.
+; ============================================================================
+
+; ----------------------------------------------------------------------------
+; The same code should work for all three games; just plug in the appropriate
+; MSX ROM at the end of the file.  XXX: The controller isn't working.
+; ----------------------------------------------------------------------------
+
+jiffy:    equ       0xFC9E
+
+          org       0x0100
+entry:    jp        entry2
+          db        "(C) Namco | Conversion by S. V. Nickolas | NabuSoft"
+entry2:   di
+          ld        a, 0x66
+          out       (0xA1), a
+          ld        a, 0x87
+          out       (0xA1), a
+          ld        bc, 0x2000
+          ld        de, 0x5FFF
+          ld        hl, gamecode+0x1FFF
+          lddr
+          ld        a, 0xC3             ; JP
+          ld        (0x0038), a
+          ld        (0x0047), a
+          ld        (0x004D), a
+          ld        (0x005C), a
+          ld        (0x0093), a
+          ld        (0x0096), a
+          ld        (0x013E), a
+          ld        (0x0141), a
+          ld        hl, wrtvdp
+          ld        (0x0048), hl
+          ld        hl, wrtvrm
+          ld        (0x004E), hl
+          ld        hl, ldirvm
+          ld        (0x005D), hl
+          ld        hl, wrtpsg
+          ld        (0x0094), hl
+          ld        hl, rdpsg
+          ld        (0x0097), hl
+          ld        hl, rdvdp
+          ld        (0x013F), hl
+          ld        hl, snsmat
+          ld        (0x0142), hl
+          ld        hl, newirq
+          ld        (0x0039), hl
+
+          ld        c, 0x41
+          ld        a, 0x07             ; Enable write to port A via reg 7
+          out       (c), a
+          dec       c
+          in        a, (c)              ; Read current setting
+          or        c                   ; Optimization: C=$40
+          out       (c), a              ; Write it back with bit flipped on.
+          inc       c
+          ld        a, 0x0E             ; Select port A.
+          out       (c), a
+          dec       c
+          ld        a, 0x10             ; VBLANK only.
+          out       (c), a
+
+          ld        a, 0x03
+          out       (0x00), a
+          ld        a, 0x22
+          out       (0xA1), a
+          ld        a, 0x87
+          out       (0xA1), a
+          ld        hl, (0x4002)
+          jp        (hl)
+
+wrtvdp:   di
+          ld        a, b
+          out       (0xA1), a
+          ld        a, c
+          or        0x80
+          out       (0xA1), a
+          ei
+          ret
+
+wrtvrm:   di
+          push      af
+          ld        a, l
+          out       (0xA1), a
+          ld        a, h
+          and       0x3F
+          or        0x40
+          out       (0xA1), a
+          pop       af
+          out       (0xA0), a
+          ei
+          ret
+
+ldirvm:   di
+          ld        a, e
+          out       (0xA1), a
+          ld        a, d
+          and       0x3F
+          or        0x40
+          out       (0xA1), a
+          dec       bc
+          inc       c
+          ld        a, b
+          ld        b, c
+          inc       a
+          ld        c, 0xA0
+ldirvm2:  outi
+          jr        nz, ldirvm2
+          dec       a
+          jr        nz, ldirvm2
+          ei
+          ret
+
+wrtpsg:   cp        0x20
+          ret       nc
+          di
+          out       (0x41), a
+          push      af
+          ld        a, e
+          out       (0x40), a
+          ei
+          pop       af
+          ret
+
+rdpsg:    cp        0x0E
+          jr        z, dojoy1
+          cp        0x0F
+          jr        z, dojoy2
+          out       (0x41), a
+          in        a, (0x40)
+          ret
+
+dojoy1:   ld        a, (joy1)
+          ret
+
+dojoy2:   ld        a, 0x0F
+          ret
+
+rdvdp:    in        a, (0xA1)
+          ret
+
+snsmat:   xor       a                   ; Always no.
+          cpl
+          ret
+
+newirq:   push      hl
+          ld        hl, (jiffy)
+          inc       hl
+          ld        (jiffy), hl
+          pop       hl
+
+          push      af
+newirq2:  in        a, (0x91)
+          bit       1, a
+          jp        z, newirq4
+          in        a, (0x90)
+          jr        newirq2
+
+newirq3:  cp        0x80                ; Has one of the joysticks moved?
+          jr        z, joy1r_1
+          jr        newirq2
+
+newirq4:  pop       af
+          ret
+
+joy1r_1:  in        a, (0x90)
+          push      bc
+          ld        b, a
+          ld        a, (joy1)
+          or        0xE0
+          bit       3, b                ; Up
+          jr        nz, joy1r_2
+          or        0x01
+joy1r_2:  bit       1, b                ; Down
+          jr        nz, joy1r_3
+          or        0x02
+joy1r_3:  bit       0, b                ; Left
+          jr        nz, joy1r_4
+          or        0x04
+joy1r_4:  bit       2, b                ; Right
+          jr        nz, joy1r_5
+          or        0x08
+joy1r_5:  bit       4, b                ; Fire
+          jr        nz, joy1r_6
+          or        0x10
+joy1r_6:  pop       bc
+          ld        (joy1), a
+          jr        newirq2
+
+joy1:     db        0x0F
+
+gamecode: 
