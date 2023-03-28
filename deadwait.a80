@@ -1,0 +1,28 @@
+; ============================================================================
+; Copyright 2023 S. V. Nickolas.
+; May be used, copied, modified and/or redistributed without restriction.
+; ============================================================================
+
+; ----------------------------------------------------------------------------
+; Fake ROM for Marduk:
+;   Shadows itself into RAM and disables ROM
+;   Deadwaits until a program is loaded at 0x0100, then automatically runs it
+; ----------------------------------------------------------------------------
+
+          org       0x0000
+entry:    xor       a
+          ld        c, a
+          ld        d, a
+          ld        e, a
+          ld        h, a
+          ld        l, a
+          inc       a
+          ld        b, a
+          ldir
+          out       (c), a
+          ld        a, 0xC3             ; JP
+          ld        hl, loop
+          ld        (0x0100), a
+          ld        (0x0101), hl
+loop:     jp        0x0100
+          ds        0x1000-$

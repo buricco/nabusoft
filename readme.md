@@ -41,7 +41,9 @@ it into the pre-compiled binary.
 Example command to compile Injector: `cc -o injector injector.c`
 
 To build each .a80 file: 
+
 `z80asm -o filename.bin filename.a80`
+
 `./injector filename.bin filename.rom filename.com`
 
 Nabu's native operating system loads applications other than the menu system
@@ -62,3 +64,13 @@ will be archived for the historical record.
 ## Games included here?
 
 `zoom909`: Zoom 909 (*a.k.a.* Buck Rogers: Planet of Zoom)
+
+## Other stuff included here?
+
+`deadwait`: Fake ROM that copies itself to RAM and then waits for an external
+source to DMA a CP/M command into place.  Quicker than loading a complete copy
+of [OpenNabu IPL](https://github.com/buricco/opennabuipl).
+
+## Third-party games?
+
+Why not?
