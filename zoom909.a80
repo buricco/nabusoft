@@ -1,0 +1,633 @@
+; ============================================================================
+; Copyright 1982, 1985 Sega.
+; Nabu conversion by S. V. Nickolas.
+; PSG emulation pinched from Ricardo Bittencourt's MSX port of Girl's Garden.
+; ============================================================================
+
+; ----------------------------------------------------------------------------
+; To build: z80asm -o zoom909.com zoom909.a80
+;   NOTE: This is a CP/M .COM file, not an MS-DOS .COM file!  Do not try to
+;         run it on an x86 CPU!
+; ----------------------------------------------------------------------------
+; For Marduk:
+;   You must compile Marduk with -DDEBUG.
+;   A stub ROM, like Deadwait, may be useful to make sure RAM is banked in at
+;   load time.  To load into a debug build of Marduk, hit F9 and enter the
+;   following at the prompts:
+;      import file>zoom909.com   (Or whatever you called the file)
+;      import addr>0x0100
+;      go (y/n)? y
+; Known issues: Up seems to be stuck on.
+;
+; For MAME:
+;   Inject into a CP/M floppy, and boot MAME into CP/M.
+;   Run it as a normal external command.
+; Known issues: Joystick doesn't seem to respond at all.
+;
+; Other known issues:
+;   White noise not generated.
+;   Controller emulation isn't quite complete.
+;   Should probably alter the title screen similar to the MSX version.
+; ----------------------------------------------------------------------------
+
+          org       0x0100
+start:    jp        reloc
+
+gamecode: ds        0x8000              ; Plug game code here.
+
+; ============================================================================
+; Patch kit relocates to 0xB000, i.e., the 4K below the SG-1000's RAM space.
+; ============================================================================
+
+nabuhax:  org       0xB000
+
+; ----------------------------------------------------------------------------
+; Space for code patches.  Since a size of 0 would be treated as 65536 by the
+; CPU and thus smash all of RAM, *something* needs to be in this space.
+; ----------------------------------------------------------------------------
+
+; ----------------------------------------------------------------------------
+; Nabu joystick is active high:     SG-1000 joystick is active low:
+;   4/10  Fire                        4/10  Fire
+;   3/08  Up                          3/08  Right
+;   2/04  Right                       2/04  Left
+;   1/02  Down                        1/02  Down
+;   0/01  Left                        0/01  Up
+; ----------------------------------------------------------------------------
+
+; ----------------------------------------------------------------------------
+; More detailed map for SG-1000 joystick, so that we can set this up a bit
+; more precisely.  Again, SG-1000 joysticks are active low while Nabu sticks
+; are active high.
+;
+; Port DC:                         Port DD:
+;   7/80  Stick 2 Down               7/80  Undefined
+;   6/40  Stick 2 Up                 6/40  Undefined
+;   5/20  Stick 1 Fire 2*            5/20  Undefined
+;   4/10  Stick 1 Fire 1             4/10  Reset*
+;   3/08  Stick 1 Right              3/08  Stick 2 Fire 2*
+;   2/04  Stick 1 Left               2/04  Stick 2 Fire 1
+;   1/02  Stick 1 Down               1/02  Stick 2 Right 
+;   0/01  Stick 1 Up                 0/01  Stick 2 Left
+;
+; * Not relevant here.
+;
+; Pause generates an NMI.  I don't see a need to implement Reset as anything
+; other than RST 0.
+;
+; Our current code (see below), detects when the Pause key is pressed - or
+; rather, when it is *released* - and fakes an NMI when that happens.  It is
+; tested and working.  What we don't currently do is distinguish between the
+; joysticks.  Also, we should patch the title screen to (with support from
+; new code in this function) use the 1 and 2 keys for start!
+; ----------------------------------------------------------------------------
+
+joy:      db        0xFF                ; $B000
+
+newirq:   push      af
+newirq2:  in        a, (0x91)
+          bit       1, a
+          jr        z, newirq8
+          in        a, (0x90)
+          cp        0xF9                ; Release Pause
+          jr        nz, newirq3
+          call      0x0066              ; Fake NMI
+          jr        newirq2
+
+; ----------------------------------------------------------------------------
+; Nabu joysticks are routed through the keyboard.  When the status of either
+; changes, the keyboard will send a "Joystick Moved" signal, followed by the
+; status of the joystick.  For Stick 1, this signal is 0x80; for Stick 2, it
+; is 0x81.  The top 3 bytes of the joystick data can be disregarded.
+;
+; Translate the Nabu bitmask to a SG-1000 bitmask.
+; XXX: This, and our replacement $0B01 joystick read routine, should properly
+;      distinguish between the two joysticks, or at least we need to patch the
+;      original code to allow a different means of entering 2-player mode.
+; XXX: The joystick emulation isn't working 100%; neither in Marduk nor MAME.
+; ----------------------------------------------------------------------------
+
+newirq3:  cp        0x80                ; Has one of the joysticks moved?
+          jr        c, newirq2          ; Not a joystick (A<0x80)
+          cp        0x82
+          jr        nc, newirq2         ; Not a joystick (A>0x81)
+newirq4:  in        a, (0x91)           ; Next byte is joystick command
+          bit       1, a
+          jr        z, newirq4
+          in        a, (0x90)
+          push      bc
+          ld        b, a
+          and       0x12                ; Fire and Down unchanged
+          bit       0, b                ; Left
+          jr        nz, newirq5
+          or        0x08                ; Left
+newirq5:  bit       2, b                ; Right
+          jr        nz, newirq6
+          or        0x04                ; Right
+newirq6:  bit       3, b                ; Up
+          jr        nz, newirq7
+          or        0x01                ; Up
+newirq7:  pop       bc
+          cpl                           ; Flip polarity (same as XOR 0xFF)
+          ld        (joy), a
+          jr        newirq2
+newirq8:  pop       af
+irqchain: jp        0xFFFF              ; Will be patched with old JP address
+
+joytrans: ret
+
+; ----------------------------------------------------------------------------
+; Replacement for function at $39B5.
+; The original code shuts up the PSG by using OTIR to pump four values to the
+; chip.  We have to translate, so OTIR won't work.  Instead, we fake the OTIR
+; and do it the longer, slower way.  The original code is:
+;         ld        hl, 0x39BF          ; Source address
+;         ld        c, 0x7F             ; SN76489 data port
+;         ld        b, 0x04             ; Transfer 4 bytes
+;         otir                          ; Do it, maggot
+;         ret
+; And we have tried to mimic this as closely as possible with the fake7f code
+; replacing output on port $7F (see below).
+; ----------------------------------------------------------------------------
+
+fake39B5: push      af
+          ld        b, 0x04
+          ld        hl, 0x39BF
+fake2:    ld        a, (hl)
+          call      fake7f
+          inc       hl
+          djnz      fake2
+          pop       af
+          ret
+
+; ----------------------------------------------------------------------------
+; Hack of Ricardo Bittencourt's PSG converter.
+; XXX: It doesn't seem to support white noise, so some sound effects won't
+;      occur properly.  It was written for a game that didn't need it.
+; ----------------------------------------------------------------------------
+
+initsnd:  push      bc
+          push      de
+          ld        a, 0x07
+          out       (0x41), a
+          in        a, (0x40)
+          and       0xF8
+          or        0x38
+          out       (0x40), a
+          ld        bc, 0x0341
+          ld        e, 0x00
+          ld        a, 0x08
+initsnd2: out       (0x41), a
+          out       (c), e
+          inc       a
+          djnz      initsnd2
+          pop       de
+          pop       bc
+          ret
+
+fake7f:   push      hl
+          push      bc
+          or        a
+          jp        p, snddata
+          ld        (latch), a
+          bit       4, a
+          jr        nz, volume
+          ld        b, a                ; Select low bits of frequency
+          rlca                          ;   for tone channels
+          rlca
+          rlca
+          rlca
+          and       0x06
+          push      af
+          call      ldfrqtab
+          ld        a, (hl)
+          and       0xF0
+          ld        c, a
+          ld        a, b
+          and       0x0F
+          or        c
+          ld        (hl), a
+          pop       af
+freqdata: cp        0x06
+          jr        z, frqnoise
+          out       (0x41), a
+          push      af
+          call      ldfrqtab
+          ld        a, (hl)
+          out       (0x40), a
+          inc       hl
+          pop       af
+          inc       a
+          out       (0x41), a
+          ld        a, (hl)
+          out       (0x40), a
+          jr        sndexit
+volume:   ld        b, a                ; Select volume for tone channels
+voldata:  rlca
+          rlca
+          rlca
+          and       0x03
+          ld        c, a
+          add       a, vol0 & 0xFF
+          ld        l, a
+          ld        a, vol0 >> 8
+          adc       a, 0x00
+          ld        h, a
+          ld        a, b
+          and       0x0F
+          xor       0x0F
+          ld        (hl), a
+          ld        a, c
+          cp        0x03
+          jr        z, volnoise
+          add       a, 0x08
+          out       (0x41), a
+          ld        a, (hl)
+          out       (0x40), a
+          jr        sndexit
+snddata:  ld        hl, latch
+          bit       4, (hl)
+          jr        z, hifreq
+          ld        b, a
+          ld        a, (latch)
+          jr        voldata
+hifreq:   ld        b, a                ; Select high bits of frequency
+          ld        a, (hl)             ;   for tone channels
+          rlca
+          rlca
+          rlca
+          rlca
+          and       0x06
+          push      af
+          call      ldfrqtab
+          ld        a, b
+          rlca
+          rlca
+          rlca
+          rlca
+          ld        b, a
+          and       0xF0
+          ld        c, a
+          ld        a, (hl)
+          and       0x0F
+          or        c
+          ld        (hl), a
+          inc       hl
+          ld        a, b
+          and       0x03
+          ld        c, a
+          ld        a, (hl)
+          and       0xFC
+          or        c
+          ld        (hl), a
+          pop       af
+          jr        freqdata
+volnoise:                               ; Not implemented
+frqnoise:                               ; Not implemented
+sndexit:  pop       bc
+          pop       hl
+          ret
+
+ldfrqtab: add       a, freq0 & 0xFF
+          ld        l, a
+          ld        a, freq0 >> 8
+          adc       a, 0
+          ld        h, a
+          ret
+
+freq0:    db        0x00
+freq1:    db        0x00
+freq2:    db        0x00
+freqn:    db        0x00
+
+vol0:     db        0x00
+vol1:     db        0x00
+vol2:     db        0x00
+voln:     db        0x00
+
+latch:    db        0x00
+
+; ----------------------------------------------------------------------------
+; End of relocatable data.  Resume code as if the ORG had not been altered.
+; ----------------------------------------------------------------------------
+
+haxlen:   equ       $-0xB000
+          org       nabuhax+haxlen
+
+; ============================================================================
+; Initialization code.
+; None of the following code remains necessary once the game is running.
+; ============================================================================
+
+; ----------------------------------------------------------------------------
+; Initialization code entry point.
+; ----------------------------------------------------------------------------
+
+reloc:    di                            ; Make sure no interrupts interfere
+          ld        sp, 0xC000          ; Stack between our code and SG RAM
+
+; ----------------------------------------------------------------------------
+; Indicate that we have been initiated.
+; On the current unfinished code, this is done by setting the background color
+; to red (such that if there is a failure, the screen will freeze red), but it
+; could be done in a later version by adding a splash screen or something...
+; ----------------------------------------------------------------------------
+
+          ld        c, 0xA1             ; Paint the screen red
+          ld        a, 0x66
+          out       (c), a
+          ld        a, 0x87
+          out       (c), a
+
+; ----------------------------------------------------------------------------
+; Make sure we're in all-RAM mode and place the ROM code where it would be on
+; an actual SG-1000, and our main patches at an area unused by the SG-1000.
+;
+; SG-1000 has no BIOS, the ROM sits right at $0000, and RAM sits from $C000 up
+; (it's just a skosh more complex than that in reality but Sega doesn't seem
+; to have made use of those details).  This game doesn't use 8000-BFFF, so our
+; hacks can go there instead.  Putting them at B000 is a little tidier than
+; just letting them fall where they may.
+; ----------------------------------------------------------------------------
+
+          xor       a                   ; Relocate ROM to 0
+          ld        b, 0x80             ; BC=$8000, DE=$0000
+          ld        c, a
+          ld        d, a
+          ld        e, a
+          inc       a                   ; Make sure ROM is banked out
+          out       (c), a              ; Optimization: C=$00
+          ld        hl, gamecode
+          ldir
+          ld        bc, haxlen          ; Then copy our hack space to $B000
+          ld        de, 0xB000
+          ld        hl, nabuhax
+          ldir
+
+; ----------------------------------------------------------------------------
+; Install hacked joystick routine.
+; See note above the IRQ handler patch for caveats.
+; ----------------------------------------------------------------------------
+
+          ld        bc, njoylen
+          ld        de, 0x0B01
+          ld        hl, njoyrtn
+          ldir
+
+; ----------------------------------------------------------------------------
+; Install patch to a function that uses OTIR to output to the SN76489.
+; ----------------------------------------------------------------------------
+
+          ld        a, 0xC3             ; JP
+          ld        (0x39B5), a
+          ld        hl, fake39B5
+          ld        (0x39B6), hl
+
+; ----------------------------------------------------------------------------
+; Patch out known VDP and PSG accesses.
+; C register-indirect form is not used and does not have to be accomodated.
+; PSG is only accessed through OUT, so we save a few bytes of code not caring
+; if we actually see IN A, ($7F), because we don't.  Replace OUT A, ($7F) with
+; RST $08 ! NOP, and replace accesses to ports $BE and $BF with $A0 resp. $A1.
+; This doesn't account for weird stuff like writing to ports with OTIR, so any
+; special cases have to be handled manually; see above.
+; ----------------------------------------------------------------------------
+
+          xor       a                   ; Iterate through ROM
+          ld        de, 0x8000
+          ld        h, a
+          ld        l, a
+vdpatch:  ld        a, (hl)             ; Translate VDP calls from SG to Nabu
+vdpatch2: cp        0xD3                ; OUT (port), A
+          jr        z, vdpatch3
+          cp        0xDB                ; IN A, (port)
+          jr        nz, vdpatch5
+vdpatch3: inc       hl                  ; Tick down (that byte stays put)
+          dec       de
+          ld        a, (hl)             ; Get next byte, actual port number
+          cp        0x7F                ; PSG
+          jr        nz, vdpatch4        ; Not PSG; skip this block.
+          dec       hl                  ; Patch over the OUT.
+          ld        a, 0xCF             ; RST $08
+          ld        (hl), a
+          inc       hl
+          xor       a                   ; NOP
+          ld        (hl), a
+          jr        vdpatch5
+vdpatch4: cp        0xBE
+          jr        c, vdpatch6         ; <$BE; not us. (Do not tick down)
+          cp        0xC0
+          jr        nc, vdpatch6        ; >$BF; not us. (Do not tick down)
+          sub       a, 0x1E             ; Map SG port to Nabu port
+          ld        (hl), a             ; Put byte back
+vdpatch5: inc       hl                  ; Tick down
+          dec       de
+vdpatch6: ld        a, d                ; Are we done yet?
+          or        e
+          jr        nz, vdpatch         ; Go back, Jack, and do it again
+
+; ----------------------------------------------------------------------------
+; Install our code to fake outputs to 7F.
+; Since this stomps the JMP at 8, route around it.
+; ----------------------------------------------------------------------------
+
+          ld        hl, (0x0007)        ; Copy the JP from $0006 to $000B.
+          ld        (0x000C), hl
+          ld        a, 0xC3             ; JP
+          ld        (0x0008), a         ; For our RST $08 handler.
+          ld        (0x000B), a         ; For the relocated JP instruction.
+          ld        hl, fake7f          ; Address of the SN76489 emulator.
+          ld        (0x0009), hl
+          ld        hl, 0x0318          ; Put a JR $000B over the old JP.
+          ld        (0x0006), hl
+
+; ----------------------------------------------------------------------------
+; Set up the PSG and its interrupt controller.
+; ----------------------------------------------------------------------------
+
+          call      initsnd             ; Initialize the PSG.
+          ld        c, 0x41
+          ld        a, 0x07             ; Enable write to port A via reg 7
+          out       (c), a
+          dec       c
+          in        a, (c)              ; Read current setting
+          or        c                   ; Optimization: C=$40
+          out       (c), a              ; Write it back with bit flipped on.
+          inc       c
+          ld        a, 0x0E             ; Select port A.
+          out       (c), a
+          dec       c
+          ld        a, 0x10             ; VBLANK only.
+          out       (c), a
+
+; ----------------------------------------------------------------------------
+; Install IRQ handler.  The original IRQ handler is chained from the new one.
+; ----------------------------------------------------------------------------
+
+          ld        hl, (0x0039)        ; Old JP address
+          ld        (irqchain+1), hl    ; Save it
+          ld        hl, newirq          ; New JP address
+          ld        (0x0039), hl        ; Save it
+
+; ----------------------------------------------------------------------------
+; Our work here is done.  Indicate this visually and then boot the game.
+; On the current unfinished code, this indication is done by setting the VDP
+; background to green (as we did red when starting).  Clearing the screen and
+; setting the color to black would probably be better for the final release.
+; ----------------------------------------------------------------------------
+
+          ld        c, 0xA1             ; Paint the screen green.
+          ld        a, 0x22
+          out       (c), a
+          ld        a, 0x87
+          out       (c), a
+          rst       0x00                ; Jump into the original code.
+
+; ----------------------------------------------------------------------------
+; New joystick routine.
+;
+; As with the relocatable code above, we need to make the assembler generate
+; to a address base not linear with our own; we set it at the beginning and
+; unset it and the end.
+; ----------------------------------------------------------------------------
+
+njoyrtn:  org       0x0B01
+L0B01:    ld        a, (0xC000)
+          and       a
+          jr        z, L0B1B
+          ld        a, (0xB000)
+          ld        b, a
+          or        0xC0
+          ld        c, a
+          ld        a, 0xFF
+          nop
+          rl        b
+          rla       
+          rl        b
+          rla       
+          ld        b, a
+          jp        L0BAC
+L0B1B:    nop
+          nop
+          nop
+          ld        a, (0xB000)
+          ld        b, a
+          or        0xC0
+          ld        c, a
+          nop
+          nop
+          nop
+          nop
+          ld        a, 0xFF
+          rl        b
+          rla       
+          rl        b
+          rla       
+          or        0xC0
+          ld        b, a
+          nop
+          nop
+          nop
+          ld        a, (0xB000)
+          bit       2, a
+          jr        nz, L0B40
+          res       2, b
+L0B40:    bit       3, a
+          jr        nz, L0B46
+          res       1, b
+L0B46:    nop
+          nop
+          nop
+          ld        a, (0xB000)
+          bit       1, a
+          jr        nz, L0B52
+          res       0, b
+L0B52:    bit       4, a
+          jr        nz, L0B58
+          res       4, c
+L0B58:    nop
+          nop
+          nop
+          ld        a, (0xB000)
+          bit       2, a
+          jr        nz, L0B64
+          res       3, b
+L0B64:    bit       4, a
+          jr        nz, L0B6A
+          res       5, c
+L0B6A:    nop
+          nop
+          nop
+          ld        a, (0xB000)
+          bit       5, a
+          jr        nz, L0B76
+          res       1, c
+L0B76:    nop
+          nop
+          nop
+          ld        a, (0xB000)
+          bit       5, a
+          jr        nz, L0B82
+          res       2, c
+L0B82:    nop
+          nop
+          nop
+          ld        a, (0xB000)
+          bit       5, a
+          jr        nz, L0B8E
+          res       3, c
+L0B8E:    bit       6, a
+          jr        nz, L0B94
+          res       0, c
+L0B94:    nop
+          nop
+          nop
+          nop
+          ld        a, 0xFF
+          bit       3, a
+          jr        nz, L0BA0
+          res       4, b
+L0BA0:    nop
+          nop
+          nop
+          nop
+          ld        a, 0xFF
+          bit       2, a
+          jr        nz, L0BAC
+          res       5, b
+L0BAC:    ld        a, (0xC070)
+          or        a
+          ret       nz
+          ld        hl, 0xC00E
+          bit       7, (hl)
+          jr        nz, L0BCD
+          ld        a, c
+          cpl       
+          and       0x30
+          jr        z, L0BC3
+          set       7, (hl)
+          res       6, (hl)
+          ret       
+L0BC3:    ld        a, b
+          cpl       
+          and       0x30
+          ret       z
+          set       7, (hl)
+          set       6, (hl)
+          ret
+L0BCD:    bit       6, (hl)
+          jr        z, L0BD9
+          ld        a, (0xC091)
+          cp        0x50
+          ld        a, b
+          jr        z, L0BDA
+L0BD9:    ld        a, c
+L0BDA:    cpl       
+          ld        (0xC008), a
+          ret       
+njoylen:  equ       $-0x0B01
+          org       njoyrtn+njoylen
+
+; ============================================================================
+; End of code.
+; ============================================================================
