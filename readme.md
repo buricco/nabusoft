@@ -72,6 +72,11 @@ eyes make all bugs shallow."  This is not where I release finished game ports,
 but where I release unfinished ports in need of assistance, and finished ports
 will be archived for the historical record.
 
+As for the "it no wrk in MAME" problem, I have no idea which emulator is doing
+The Right Thing®™©, and I have no way to test any of this on metal.  Marduk is
+following my best understanding of the available documentation, but MAME tries
+to be accurate while Marduk takes a lot of shortcuts.
+
 ## Games included here?
 
 `warpwarp`: Galaxian, Tank Battalion, Warp & Warp (same stub for all 3)

@@ -10,12 +10,11 @@
 ; MSX ROM at the end of the file.  XXX: The controller isn't working.
 ; ----------------------------------------------------------------------------
 
-jiffy:    equ       0xFC9E
-
           org       0x0100
 entry:    jp        entry2
           db        "(C) Namco | Conversion by S. V. Nickolas | NabuSoft"
 entry2:   di
+;         im        1
           ld        a, 0x66
           out       (0xA1), a
           ld        a, 0x87
@@ -24,6 +23,7 @@ entry2:   di
           ld        de, 0x5FFF
           ld        hl, gamecode+0x1FFF
           lddr
+
           ld        a, 0xC3             ; JP
           ld        (0x0038), a
           ld        (0x0047), a
@@ -134,10 +134,12 @@ rdpsg:    cp        0x0E
           in        a, (0x40)
           ret
 
-dojoy1:   ld        a, (joy1)
+dojoy1:   call      newirq
+          ld        a, (joy1)
           ret
 
-dojoy2:   ld        a, 0x0F
+dojoy2:   call      newirq
+          ld        a, 0x0F
           ret
 
 rdvdp:    in        a, (0xA1)
@@ -147,13 +149,7 @@ snsmat:   xor       a                   ; Always no.
           cpl
           ret
 
-newirq:   push      hl
-          ld        hl, (jiffy)
-          inc       hl
-          ld        (jiffy), hl
-          pop       hl
-
-          push      af
+newirq:   push      af
 newirq2:  in        a, (0x91)
           bit       1, a
           jp        z, newirq4
