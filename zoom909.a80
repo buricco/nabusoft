@@ -10,23 +10,16 @@
 ;         run it on an x86 CPU!
 ; ----------------------------------------------------------------------------
 ; For Marduk:
-;   You must compile Marduk with -DDEBUG.
-;   A stub ROM, like Deadwait, may be useful to make sure RAM is banked in at
-;   load time.  To load into a debug build of Marduk, hit F9 and enter the
-;   following at the prompts:
-;      import file>zoom909.com   (Or whatever you called the file)
-;      import addr>0x0100
-;      go (y/n)? y
+;   Use the "-x" switch to load and run zoom909.com immediately on launch.
 ;
 ; For MAME:
 ;   Inject into a CP/M floppy, and boot MAME into CP/M.
 ;   Run it as a normal external command.
-; Known issues: Commands from joystick 2 appear to come from joystick 1.
+; Known issues: Joystick is really twitchy and floaty.
 ;
 ; Other known issues:
 ;   White noise not generated.
-;   Controller emulation is buggy, especially for player 2.
-;   Should probably alter the title screen similar to the MSX version.
+;   Controller emulation is buggy.
 ; ----------------------------------------------------------------------------
 
           org       0x0100
@@ -80,24 +73,18 @@ nabuhax:  org       0xB000
 ;
 ; Our current code (see below), detects when the Pause key is pressed - or
 ; rather, when it is *released* - and fakes an NMI when that happens.  It is
-; tested and working.  What we don't currently do is distinguish between the
-; joysticks.  Also, we should patch the title screen to (with support from
-; new code in this function) use the 1 and 2 keys for start!
+; tested and working.
 ; ----------------------------------------------------------------------------
 
 joy1:     db        0xFF                ; $B000
 joy2:     db        0xFF
-lastjoy:  db        0x01
 
 newirq:   push      af
-newirq2:  in        a, (0x91)
+newirq2:  in        a, (0x91)           ; Keyboard controller?
           bit       1, a
-          jp        z, newirq8
-          in        a, (0x90)
-          cp        0xF9                ; Release Pause
-          jr        nz, newirq3
-          call      0x0066              ; Fake NMI
-          jr        newirq2
+          jp        nz, newirq4         ; Yes; enter keyboard IRQ handler.
+          pop       af                  ; Not keyboard controller; must be VBI
+irqchain: jp        0xFFFF              ; Will be patched with old JP address
 
 ; ----------------------------------------------------------------------------
 ; Nabu joysticks are routed through the keyboard.  When the status of either
@@ -106,35 +93,32 @@ newirq2:  in        a, (0x91)
 ; is 0x81.  The top 3 bytes of the joystick data can be disregarded.
 ;
 ; Translate the Nabu bitmask to a SG-1000 bitmask.
-; XXX: The joystick emulation isn't working 100%; neither in Marduk nor MAME.
 ; ----------------------------------------------------------------------------
 
-newirq3:  cp        0x80                ; Has one of the joysticks moved?
+newirq3:  in        a, (0x91)           ; Poll keyboard
+          bit       1, a
+          jr        z, leaveirq         ; Nothing more from the keyboard
+newirq4:  in        a, (0x90)
+          cp        0xF9                ; Release Pause?
+          jr        nz, newirq5
+          call      0x0066              ; Fake NMI
+leaveirq: pop       af
+          ei
+          reti
+
+newirq5:  cp        0x80                ; Has one of the joysticks moved?
           jr        z, joy1r_1
           cp        0x81
           jr        z, joy2r_1
-          cp        0xA0
-          jr        c, newirq2
-          cp        0xC0
-          jr        nc, newirq2
-          push      bc
-          ld        b, a
-          ld        a, (lastjoy)
-          cp        0x01
-          ld        a, b
-          pop       bc
-          jr        z, joy1r_2
-          jr        joy2r_2
+          jr        leaveirq
 
-joy1r_1:  ld        a, 0x01
-          ld        (lastjoy), a
-          in        a, (0x91)
+joy1r_1:  in        a, (0x91)           ; Wait for the data byte to appear
           bit       1, a
           jp        z, joy1r_1
-          in        a, (0x90)
+          in        a, (0x90)           ; Read joystick
 joy1r_2:  push      bc
           ld        b, a
-          ld        a, (joy1)
+          ld        a, (joy1)           ; Leave joystick 2 data alone
           and       0xC0
           or        0x20
           bit       3, b                ; Up
@@ -153,18 +137,16 @@ joy1r_6:  bit       4, b                ; Fire
           jr        nz, joy1r_7
           or        0x10
 joy1r_7:  pop       bc
-          ld        (joy1), a
-          jr        newirq2
+          ld        (joy1), a           ; Save "DC"
+          jr        newirq3             ; Return to polling
 
-joy2r_1:  ld        a, 0x02
-          ld        (lastjoy), a
-          in        a, (0x91)
+joy2r_1:  in        a, (0x91)           ; Wait for the data byte to appear
           bit       1, a
-          jp        z, joy1r_3
-          in        a, (0x90)
+          jp        z, joy2r_1
+          in        a, (0x90)           ; Read joystick
 joy2r_2:  push      bc
           ld        b, a
-          ld        a, (joy1)
+          ld        a, (joy1)           ; Leave joystick 1 data alone
           and       0xBF
           bit       3, b                ; Up
           jr        nz, joy2r_3
@@ -184,11 +166,8 @@ joy2r_6:  bit       4, b                ; Fire
           jr        nz, joy2r_7
           or        0x04
 joy2r_7:  pop       bc
-          ld        (joy2), a
-          jp        newirq2
-
-newirq8:  pop       af
-irqchain: jp        0xFFFF              ; Will be patched with old JP address
+          ld        (joy2), a           ; Save "DD"
+          jp        newirq3             ; Return to polling
 
 joytrans: ret
 
@@ -520,7 +499,7 @@ vdpatch6: ld        a, d                ; Are we done yet?
           ld        a, 0x0E             ; Select port A.
           out       (c), a
           dec       c
-          ld        a, 0x10             ; VBLANK only.
+          ld        a, 0x30             ; VBLANK or KBD
           out       (c), a
 
 ; ----------------------------------------------------------------------------
