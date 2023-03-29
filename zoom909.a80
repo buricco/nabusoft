@@ -29,7 +29,7 @@ start:    jp        reloc
 ; Unmodified copy of a "Zoom 909" SG-1000 ROM.
 ; ============================================================================
 
-gamecode: ds        32768
+gamecode: incbin    "zoom909.sg"
 
 ; ============================================================================
 ; Patch kit relocates to 0xB000, i.e., the 4K below the SG-1000's RAM space.
