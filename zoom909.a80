@@ -77,14 +77,12 @@ nabuhax:  org       0xB000
 ; ----------------------------------------------------------------------------
 
 joy1:     db        0xFF                ; $B000
-joy2:     db        0xFF
+joy2:     db        0xFF                ; $B001
+          nop
+          nop
 
-newirq:   push      af
-newirq2:  in        a, (0x91)           ; Keyboard controller?
-          bit       1, a
-          jp        nz, newirq4         ; Yes; enter keyboard IRQ handler.
-          pop       af                  ; Not keyboard controller; must be VBI
-irqchain: jp        0xFFFF              ; Will be patched with old JP address
+vkbirq:   dw        kbirq               ; Keyboard controller interrupt vector
+vvbi:     dw        0x0038              ; VBI vector
 
 ; ----------------------------------------------------------------------------
 ; Nabu joysticks are routed through the keyboard.  When the status of either
@@ -95,18 +93,16 @@ irqchain: jp        0xFFFF              ; Will be patched with old JP address
 ; Translate the Nabu bitmask to a SG-1000 bitmask.
 ; ----------------------------------------------------------------------------
 
-newirq3:  in        a, (0x91)           ; Poll keyboard
-          bit       1, a
-          jr        z, leaveirq         ; Nothing more from the keyboard
-newirq4:  in        a, (0x90)
+kbirq:    push      af
+getkey:   in        a, (0x90)
           cp        0xF9                ; Release Pause?
-          jr        nz, newirq5
+          jr        nz, ckjoy
           call      0x0066              ; Fake NMI
 leaveirq: pop       af
-          ei
+areti:    ei
           reti
 
-newirq5:  cp        0x80                ; Has one of the joysticks moved?
+ckjoy:    cp        0x80                ; Has one of the joysticks moved?
           jr        z, joy1r_1
           cp        0x81
           jr        z, joy2r_1
@@ -138,7 +134,10 @@ joy1r_6:  bit       4, b                ; Fire
           or        0x10
 joy1r_7:  pop       bc
           ld        (joy1), a           ; Save "DC"
-          jr        newirq3             ; Return to polling
+nextkey:  in        a, (0x91)           ; Poll keyboard
+          bit       1, a
+          jr        z, leaveirq         ; Nothing more from the keyboard
+          jr        getkey
 
 joy2r_1:  in        a, (0x91)           ; Wait for the data byte to appear
           bit       1, a
@@ -167,7 +166,7 @@ joy2r_6:  bit       4, b                ; Fire
           or        0x04
 joy2r_7:  pop       bc
           ld        (joy2), a           ; Save "DD"
-          jp        newirq3             ; Return to polling
+          jr        nextkey             ; Return to polling
 
 joytrans: ret
 
@@ -503,13 +502,15 @@ vdpatch6: ld        a, d                ; Are we done yet?
           out       (c), a
 
 ; ----------------------------------------------------------------------------
-; Install IRQ handler.  The original IRQ handler is chained from the new one.
+; Install IRQ handler.  This replaces the IM1 (only thing you can do on an SG)
+; interrupt handler with an IM2 handler that can differentiate VBI from human
+; input interrupt, and vectors VBI into the IM1 handler.
 ; ----------------------------------------------------------------------------
 
-          ld        hl, (0x0039)        ; Old JP address
-          ld        (irqchain+1), hl    ; Save it
-          ld        hl, newirq          ; New JP address
-          ld        (0x0039), hl        ; Save it
+          ld        a, 0x5E             ; Change IM 1 to IM 2.
+          ld        (0x0005), a
+          ld        a, 0xB0             ; input interrupt is xx04 followed
+          ld        i, a                ; immediately by VBI (where xx=I).
 
 ; ----------------------------------------------------------------------------
 ; Our work here is done.  Indicate this visually and then boot the game.
