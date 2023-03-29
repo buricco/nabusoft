@@ -21,7 +21,7 @@
 ; For MAME:
 ;   Inject into a CP/M floppy, and boot MAME into CP/M.
 ;   Run it as a normal external command.
-; Known issues: Joystick doesn't seem to respond at all.
+; Known issues: Commands from joystick 2 appear to come from joystick 1.
 ;
 ; Other known issues:
 ;   White noise not generated.
@@ -87,6 +87,7 @@ nabuhax:  org       0xB000
 
 joy1:     db        0xFF                ; $B000
 joy2:     db        0xFF
+lastjoy:  db        0x01
 
 newirq:   push      af
 newirq2:  in        a, (0x91)
@@ -112,56 +113,77 @@ newirq3:  cp        0x80                ; Has one of the joysticks moved?
           jr        z, joy1r_1
           cp        0x81
           jr        z, joy2r_1
-          jr        newirq2
-
-joy1r_1:  in        a, (0x90)
+          cp        0xA0
+          jr        c, newirq2
+          cp        0xC0
+          jr        nc, newirq2
           push      bc
+          ld        b, a
+          ld        a, (lastjoy)
+          cp        0x01
+          ld        a, b
+          pop       bc
+          jr        z, joy1r_2
+          jr        joy2r_2
+
+joy1r_1:  ld        a, 0x01
+          ld        (lastjoy), a
+          in        a, (0x91)
+          bit       1, a
+          jp        z, joy1r_1
+          in        a, (0x90)
+joy1r_2:  push      bc
           ld        b, a
           ld        a, (joy1)
           and       0xC0
           or        0x20
           bit       3, b                ; Up
-          jr        nz, joy1r_2
-          or        0x01
-joy1r_2:  bit       1, b                ; Down
           jr        nz, joy1r_3
-          or        0x02
-joy1r_3:  bit       0, b                ; Left
+          or        0x01
+joy1r_3:  bit       1, b                ; Down
           jr        nz, joy1r_4
-          or        0x04
-joy1r_4:  bit       2, b                ; Right
+          or        0x02
+joy1r_4:  bit       0, b                ; Left
           jr        nz, joy1r_5
-          or        0x08
-joy1r_5:  bit       4, b                ; Fire
+          or        0x04
+joy1r_5:  bit       2, b                ; Right
           jr        nz, joy1r_6
+          or        0x08
+joy1r_6:  bit       4, b                ; Fire
+          jr        nz, joy1r_7
           or        0x10
-joy1r_6:  pop       bc
+joy1r_7:  pop       bc
           ld        (joy1), a
           jr        newirq2
 
-joy2r_1:  in        a, (0x90)
-          push      bc
+joy2r_1:  ld        a, 0x02
+          ld        (lastjoy), a
+          in        a, (0x91)
+          bit       1, a
+          jp        z, joy1r_3
+          in        a, (0x90)
+joy2r_2:  push      bc
           ld        b, a
           ld        a, (joy1)
           and       0xBF
           bit       3, b                ; Up
-          jr        nz, joy2r_2
-          or        0x40
-joy2r_2:  bit       1, b                ; Down
           jr        nz, joy2r_3
+          or        0x40
+joy2r_3:  bit       1, b                ; Down
+          jr        nz, joy2r_4
           or        0x80
-joy2r_3:  ld        (joy1), a
+joy2r_4:  ld        (joy1), a
           ld        a, 0xF8
           bit       0, b                ; Left
-          jr        nz, joy2r_4
-          or        0x01
-joy2r_4:  bit       2, b                ; Right
           jr        nz, joy2r_5
-          or        0x02
-joy2r_5:  bit       4, b                ; Fire
+          or        0x01
+joy2r_5:  bit       2, b                ; Right
           jr        nz, joy2r_6
+          or        0x02
+joy2r_6:  bit       4, b                ; Fire
+          jr        nz, joy2r_7
           or        0x04
-joy2r_6:  pop       bc
+joy2r_7:  pop       bc
           ld        (joy2), a
           jp        newirq2
 
