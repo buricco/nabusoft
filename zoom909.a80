@@ -78,8 +78,8 @@ nabuhax:  org       0xB000
 
 joy1:     db        0xFF                ; $B000
 joy2:     db        0xFF                ; $B001
-          nop
-          nop
+joy1raw:  db        0x00
+joy2raw:  db        0x00
 
 vkbirq:   dw        kbirq               ; Keyboard controller interrupt vector
 vvbi:     dw        0x0038              ; VBI vector
@@ -95,10 +95,14 @@ vvbi:     dw        0x0038              ; VBI vector
 
 kbirq:    push      af
 getkey:   in        a, (0x90)
+          cp        0x80                ; Has one of the joysticks moved?
+          jr        z, joy1r
+          cp        0x81
+          jr        z, joy2r
           cp        0x12                ; Ctrl-R?
           jp        z, 0x0000           ; Yes; reset
           cp        0xF9                ; Release Pause?
-          jr        nz, ckjoy           ; No, so try this as joystick
+          jr        nz, leaveirq        ; No
           call      0x0066              ; Fake NMI, then return here for
                                         ;   further processing
           ld        a, (0xC001)         ; Update Pause LED
@@ -113,73 +117,67 @@ leaveirq: pop       af
           ei
           reti
 
-ckjoy:    cp        0x80                ; Has one of the joysticks moved?
-          jr        z, joy1r_1
-          cp        0x81
-          jr        z, joy2r_1
+joy1r:    in        a, (0x91)           ; Wait for the data byte to appear
+          bit       1, a
+          jr        z, joy1r
+          in        a, (0x90)           ; Read joystick
+          ld        (joy1raw), a
+          jr        leaveirq
+joy2r:    in        a, (0x91)           ; Wait for the data byte to appear
+          bit       1, a
+          jr        z, joy2r
+          in        a, (0x90)           ; Read joystick
+          ld        (joy2raw), a
           jr        leaveirq
 
-joy1r_1:  in        a, (0x91)           ; Wait for the data byte to appear
-          bit       1, a
-          jp        z, joy1r_1
-          in        a, (0x90)           ; Read joystick
-joy1r_2:  push      bc
+procjoy:  ld        a, (joy1raw)
+          push      bc
           ld        b, a
           ld        a, (joy1)           ; Leave joystick 2 data alone
           and       0xC0
           or        0x20
           bit       3, b                ; Up
-          jr        nz, joy1r_3
+          jr        nz, procjoy2
           or        0x01
-joy1r_3:  bit       1, b                ; Down
-          jr        nz, joy1r_4
+procjoy2: bit       1, b                ; Down
+          jr        nz, procjoy3
           or        0x02
-joy1r_4:  bit       0, b                ; Left
-          jr        nz, joy1r_5
+procjoy3: bit       0, b                ; Left
+          jr        nz, procjoy4
           or        0x04
-joy1r_5:  bit       2, b                ; Right
-          jr        nz, joy1r_6
+procjoy4: bit       2, b                ; Right
+          jr        nz, procjoy5
           or        0x08
-joy1r_6:  bit       4, b                ; Fire
-          jr        nz, joy1r_7
+procjoy5: bit       4, b                ; Fire
+          jr        nz, procjoy6
           or        0x10
-joy1r_7:  pop       bc
+procjoy6: pop       bc
           ld        (joy1), a           ; Save "DC"
-nextkey:  in        a, (0x91)           ; Poll keyboard
-          bit       1, a
-          jr        z, leaveirq         ; Nothing more from the keyboard
-          jr        getkey
-
-joy2r_1:  in        a, (0x91)           ; Wait for the data byte to appear
-          bit       1, a
-          jp        z, joy2r_1
-          in        a, (0x90)           ; Read joystick
-joy2r_2:  push      bc
+          ld        a, (joy2raw)
+          push      bc
           ld        b, a
           ld        a, (joy1)           ; Leave joystick 1 data alone
           and       0xBF
           bit       3, b                ; Up
-          jr        nz, joy2r_3
+          jr        nz, procjoy7
           or        0x40
-joy2r_3:  bit       1, b                ; Down
-          jr        nz, joy2r_4
+procjoy7: bit       1, b                ; Down
+          jr        nz, procjoy8
           or        0x80
-joy2r_4:  ld        (joy1), a
+procjoy8: ld        (joy1), a
           ld        a, 0xF8
           bit       0, b                ; Left
-          jr        nz, joy2r_5
+          jr        nz, procjoy9
           or        0x01
-joy2r_5:  bit       2, b                ; Right
-          jr        nz, joy2r_6
+procjoy9: bit       2, b                ; Right
+          jr        nz, prcjoy10
           or        0x02
-joy2r_6:  bit       4, b                ; Fire
-          jr        nz, joy2r_7
+prcjoy10: bit       4, b                ; Fire
+          jr        nz, prcjoy11
           or        0x04
-joy2r_7:  pop       bc
+prcjoy11: pop       bc
           ld        (joy2), a           ; Save "DD"
-          jr        nextkey             ; Return to polling
-
-joytrans: ret
+          ret
 
 ; ----------------------------------------------------------------------------
 ; Replacement for function at $39B5.
@@ -546,8 +544,9 @@ vdpatch6: ld        a, d                ; Are we done yet?
 ; ----------------------------------------------------------------------------
 
 njoyrtn:  org       0x0B01
-L0B01:    ld        a, (joy1)
-          ld        b, a
+L0B01:    call      procjoy
+          ld        a, (joy1)
+nojoywt:  ld        b, a
           or        0xC0
           ld        c, a
           ld        a, (joy2)
