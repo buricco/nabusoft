@@ -95,11 +95,22 @@ vvbi:     dw        0x0038              ; VBI vector
 
 kbirq:    push      af
 getkey:   in        a, (0x90)
+          cp        0x12                ; Ctrl-R?
+          jp        z, 0x0000           ; Yes; reset
           cp        0xF9                ; Release Pause?
-          jr        nz, ckjoy
-          call      0x0066              ; Fake NMI
+          jr        nz, ckjoy           ; No, so try this as joystick
+          call      0x0066              ; Fake NMI, then return here for
+                                        ;   further processing
+          ld        a, (0xC001)         ; Update Pause LED
+          sla       a
+          sla       a
+          sla       a
+          sla       a
+          sla       a
+          or        0x03
+          out       (0x00), a
 leaveirq: pop       af
-areti:    ei
+          ei
           reti
 
 ckjoy:    cp        0x80                ; Has one of the joysticks moved?
