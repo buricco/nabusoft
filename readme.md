@@ -30,7 +30,9 @@ fair use exemption), the binaries in their complete states cannot.
 This is the reason I have included an "Injector" utility; it allows the
 publication of the wrapper code *without* requiring me to also publish ROM
 dumps of the games in question.  You supply the ROM, and the program will fit
-it into the pre-compiled binary.
+it into the pre-compiled binary.  (This was required for earlier revisions of
+Zoom 909; it is no longer needed since the wrapper sources the ROM from a
+separate file at compile time.)
 
 ## What sort of weird Z80 assembler dialect is this?
 
@@ -38,17 +40,18 @@ it into the pre-compiled binary.
 
 ## How do I use these wrappers?
 
-### SG-1000
+You'll need the ROM file in the current directory, if the wrapper references
+it.  At any rate you'll need to start with the assembler:
+`z80asm -o filename.bin filename.a80`
+
+### SG-1000 (with `DS` gap)
 
 Example command to compile Injector: `cc -o injector injector.c`
 
-To build each .a80 file: 
-
-`z80asm -o filename.bin filename.a80`
-
+Then Injector is used as follows:
 `./injector filename.bin filename.rom filename.com`
 
-### MSX
+### MSX (with ROM space at the end)
 
 Build the .a80 as above.
 
@@ -56,6 +59,10 @@ On Windows, `copy /b filename.bin+filename.rom filename.com`
 
 On anything remotely resembling Unix,
 `cat filename.bin filename.rom > filename.com`
+
+### File that uses `INCBIN` to automatically use the ROM
+
+Just make sure the file is in the current directory with the required name.
 
 Nabu's native operating system loads applications other than the menu system
 at 0x0100, the same as CP/M, so the resulting binaries are meant to be used in
@@ -81,6 +88,18 @@ to be accurate while Marduk takes a lot of shortcuts.
 
 `warpwarp`: Galaxian, Tank Battalion, Warp & Warp (same stub for all 3)
 `zoom909`: Zoom 909 (*a.k.a.* Buck Rogers: Planet of Zoom)
+
+## Games that *work?*
+
+Zoom 909 works in Marduk and apparently works on metal, apart from sound
+issues related to the on-the-fly SN76489-to-AY8910 translation.
+
+## Controls?
+
+As with the official Nabu games, these games expect a joystick, and will
+support the Pause key.
+
+Also, Zoom 909 supports the Ctrl-R key to restart.
 
 ## Other stuff included here?
 
