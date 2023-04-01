@@ -1,0 +1,555 @@
+; ============================================================================
+; Copyright 1982, 1985 Sega.
+; Nabu conversion by S. V. Nickolas.
+; PSG emulation pinched from Ricardo Bittencourt's MSX port of Girl's Garden.
+; ============================================================================
+
+          org       0x0100
+start:    jp        reloc
+
+; ============================================================================
+; Unmodified copy of a "Zaxxon" SG-1000 ROM.
+; ============================================================================
+
+gamecode: incbin    "zaxxon.sg"
+
+; ============================================================================
+; Patch kit relocates to 0xB000, i.e., the 4K below the SG-1000's RAM space.
+; ============================================================================
+
+nabuhax:  org       0xB000
+
+; ----------------------------------------------------------------------------
+; Space for code patches.  Since a size of 0 would be treated as 65536 by the
+; CPU and thus smash all of RAM, *something* needs to be in this space.
+; ----------------------------------------------------------------------------
+
+joy1:     db        0xFF                ; $B000
+joy2:     db        0xFF                ; $B001
+joy1raw:  db        0x00
+joy2raw:  db        0x00
+
+vkbirq:   dw        kbirq               ; Keyboard controller interrupt vector
+vvbi:     dw        0x0038              ; VBI vector
+
+; ----------------------------------------------------------------------------
+; Nabu joysticks are routed through the keyboard.  When the status of either
+; changes, the keyboard will send a "Joystick Moved" signal, followed by the
+; status of the joystick.  For Stick 1, this signal is 0x80; for Stick 2, it
+; is 0x81.  The top 3 bytes of the joystick data can be disregarded.
+;
+; It is hard to optimize this code any more than already done.
+;
+; Translate the Nabu bitmask to a SG-1000 bitmask.
+; ----------------------------------------------------------------------------
+
+kbirq:    push      af
+          in        a, (0x90)
+          cp        0x80                ; Has one of the joysticks moved?
+          jr        z, joy1r
+          cp        0x81
+          jr        z, joy2r
+          cp        0x12                ; Ctrl-R?
+          jp        z, 0x0000           ; Yes; reset
+          cp        0xF9                ; Release Pause?
+          jr        nz, leaveirq        ; No
+          call      0x0066              ; Fake NMI, then return here for
+                                        ;   further processing
+          ld        a, (0xC001)         ; Update Pause LED
+          sla       a
+          sla       a
+          sla       a
+          sla       a
+          sla       a
+          or        0x03
+          out       (0x00), a
+leaveirq: pop       af
+          ei
+          reti
+
+joy1r:    in        a, (0x91)           ; Wait for the data byte to appear
+          bit       1, a
+          jr        z, joy1r
+          in        a, (0x90)           ; Read joystick
+          ld        (joy1raw), a
+          jr        leaveirq
+joy2r:    in        a, (0x91)           ; Wait for the data byte to appear
+          bit       1, a
+          jr        z, joy2r
+          in        a, (0x90)           ; Read joystick
+          ld        (joy2raw), a
+          jr        leaveirq
+
+procjoy:  ld        a, (joy1raw)
+          push      bc
+          ld        b, a
+          ld        a, (joy1)           ; Leave joystick 2 data alone
+          and       0xC0
+          or        0x20
+          bit       3, b                ; Up
+          jr        nz, procjoy2
+          or        0x01
+procjoy2: bit       1, b                ; Down
+          jr        nz, procjoy3
+          or        0x02
+procjoy3: bit       0, b                ; Left
+          jr        nz, procjoy4
+          or        0x04
+procjoy4: bit       2, b                ; Right
+          jr        nz, procjoy5
+          or        0x08
+procjoy5: bit       4, b                ; Fire
+          jr        nz, procjoy6
+          or        0x10
+procjoy6: pop       bc
+          ld        (joy1), a           ; Save "DC"
+          ld        a, (joy2raw)
+          push      bc
+          ld        b, a
+          ld        a, (joy1)           ; Leave joystick 1 data alone
+          and       0xBF
+          bit       3, b                ; Up
+          jr        nz, procjoy7
+          or        0x40
+procjoy7: bit       1, b                ; Down
+          jr        nz, procjoy8
+          or        0x80
+procjoy8: ld        (joy1), a
+          ld        a, 0xF8
+          bit       0, b                ; Left
+          jr        nz, procjoy9
+          or        0x01
+procjoy9: bit       2, b                ; Right
+          jr        nz, prcjoy10
+          or        0x02
+prcjoy10: bit       4, b                ; Fire
+          jr        nz, prcjoy11
+          or        0x04
+prcjoy11: pop       bc
+          ld        (joy2), a           ; Save "DD"
+          ret
+
+fake0018: di
+          ld        a, e
+          out       (0xA1), a           ; VDP address register
+          ld        a, d
+          and       0x3F
+          or        0x40
+          out       (0xA1), a
+          ret
+
+; ----------------------------------------------------------------------------
+; Replacement for function at $6AD1.
+; The original code shuts up the PSG by using OTIR to pump four values to the
+; chip.  We have to translate, so OTIR won't work.  Instead, we fake the OTIR
+; and do it the longer, slower way.  The original code is:
+;         ld        hl, 0x6AD1          ; Source address
+;         ld        c, 0x7F             ; SN76489 data port
+;         ld        b, 0x04             ; Transfer 4 bytes
+;         otir                          ; Do it, maggot
+;         ret
+; And we have tried to mimic this as closely as possible with the fake7f code
+; replacing output on port $7F (see below).
+; ----------------------------------------------------------------------------
+
+fake6AD1: push      af
+          ld        b, 0x04
+          ld        hl, 0x6AD1
+fake2:    ld        a, (hl)
+          call      fake7f
+          inc       hl
+          djnz      fake2
+          pop       af
+          ret
+; ----------------------------------------------------------------------------
+; Hack of Ricardo Bittencourt's PSG converter.
+; XXX: It doesn't seem to support white noise, so some sound effects won't
+;      occur properly.  It was written for a game that didn't need it.
+; ----------------------------------------------------------------------------
+
+initsnd:  push      bc
+          push      de
+          ld        a, 0x07
+          out       (0x41), a
+          in        a, (0x40)
+          and       0xF8
+          or        0x38
+          out       (0x40), a
+          ld        bc, 0x0341
+          ld        e, 0x00
+          ld        a, 0x08
+initsnd2: out       (0x41), a
+          out       (c), e
+          inc       a
+          djnz      initsnd2
+          pop       de
+          pop       bc
+          ret
+
+fake7f:   push      hl
+          push      bc
+          or        a
+          jp        p, snddata
+          ld        (latch), a
+          bit       4, a
+          jr        nz, volume
+          ld        b, a                ; Select low bits of frequency
+          rlca                          ;   for tone channels
+          rlca
+          rlca
+          rlca
+          and       0x06
+          push      af
+          call      ldfrqtab
+          ld        a, (hl)
+          and       0xF0
+          ld        c, a
+          ld        a, b
+          and       0x0F
+          or        c
+          ld        (hl), a
+          pop       af
+freqdata: cp        0x06
+          jr        z, frqnoise
+          out       (0x41), a
+          push      af
+          call      ldfrqtab
+          ld        a, (hl)
+          out       (0x40), a
+          inc       hl
+          pop       af
+          inc       a
+          out       (0x41), a
+          ld        a, (hl)
+          out       (0x40), a
+          jr        sndexit
+volume:   ld        b, a                ; Select volume for tone channels
+voldata:  rlca
+          rlca
+          rlca
+          and       0x03
+          ld        c, a
+          add       a, vol0 & 0xFF
+          ld        l, a
+          ld        a, vol0 >> 8
+          adc       a, 0x00
+          ld        h, a
+          ld        a, b
+          and       0x0F
+          xor       0x0F
+          ld        (hl), a
+          ld        a, c
+          cp        0x03
+          jr        z, volnoise
+          add       a, 0x08
+          out       (0x41), a
+          ld        a, (hl)
+          out       (0x40), a
+          jr        sndexit
+snddata:  ld        hl, latch
+          bit       4, (hl)
+          jr        z, hifreq
+          ld        b, a
+          ld        a, (latch)
+          jr        voldata
+hifreq:   ld        b, a                ; Select high bits of frequency
+          ld        a, (hl)             ;   for tone channels
+          rlca
+          rlca
+          rlca
+          rlca
+          and       0x06
+          push      af
+          call      ldfrqtab
+          ld        a, b
+          rlca
+          rlca
+          rlca
+          rlca
+          ld        b, a
+          and       0xF0
+          ld        c, a
+          ld        a, (hl)
+          and       0x0F
+          or        c
+          ld        (hl), a
+          inc       hl
+          ld        a, b
+          and       0x03
+          ld        c, a
+          ld        a, (hl)
+          and       0xFC
+          or        c
+          ld        (hl), a
+          pop       af
+          jr        freqdata
+volnoise:                               ; Not implemented
+frqnoise:                               ; Not implemented
+sndexit:  pop       bc
+          pop       hl
+          ret
+
+ldfrqtab: add       a, freq0 & 0xFF
+          ld        l, a
+          ld        a, freq0 >> 8
+          adc       a, 0
+          ld        h, a
+          ret
+
+freq0:    db        0x00
+freq1:    db        0x00
+freq2:    db        0x00
+freqn:    db        0x00
+
+vol0:     db        0x00
+vol1:     db        0x00
+vol2:     db        0x00
+voln:     db        0x00
+
+latch:    db        0x00
+
+; ----------------------------------------------------------------------------
+; End of relocatable data.  Resume code as if the ORG had not been altered.
+; ----------------------------------------------------------------------------
+
+haxlen:   equ       $-0xB000
+          org       nabuhax+haxlen
+
+; ============================================================================
+; Initialization code.
+; None of the following code remains necessary once the game is running.
+; ============================================================================
+
+; ----------------------------------------------------------------------------
+; Initialization code entry point.
+; ----------------------------------------------------------------------------
+
+reloc:    di                            ; Make sure no interrupts interfere
+          ld        sp, 0xC000          ; Stack between our code and SG RAM
+
+; ----------------------------------------------------------------------------
+; Indicate that we have been initiated.
+; ----------------------------------------------------------------------------
+          
+          call      splash
+
+; ----------------------------------------------------------------------------
+; Make sure we're in all-RAM mode and place the ROM code where it would be on
+; an actual SG-1000, and our main patches at an area unused by the SG-1000.
+;
+; SG-1000 has no BIOS, the ROM sits right at $0000, and RAM sits from $C000 up
+; (it's just a skosh more complex than that in reality but Sega doesn't seem
+; to have made use of those details).  This game doesn't use 8000-BFFF, so our
+; hacks can go there instead.  Putting them at B000 is a little tidier than
+; just letting them fall where they may.
+; ----------------------------------------------------------------------------
+
+          xor       a                   ; Relocate ROM to 0
+          ld        b, 0x80             ; BC=$8000, DE=$0000
+          ld        c, a
+          ld        d, a
+          ld        e, a
+          inc       a                   ; Make sure ROM is banked out
+          out       (c), a              ; Optimization: C=$00
+          ld        hl, gamecode
+          ldir
+          ld        bc, haxlen          ; Then copy our hack space to $B000
+          ld        de, 0xB000
+          ld        hl, nabuhax
+          ldir
+
+; ----------------------------------------------------------------------------
+; Known Unknowns
+;   * 068E-06BD looks like some sort of Pause handler, and reads something
+;     from the joystick ports?
+;   * 0A4D-0AAD looks to be our actual joystick handler.
+; ----------------------------------------------------------------------------
+
+; ----------------------------------------------------------------------------
+; Install hacked joystick routine.
+; ----------------------------------------------------------------------------
+
+          ld        bc, njoylen
+          ld        de, 0x0A4D
+          ld        hl, njoyrtn
+          ldir
+
+; ----------------------------------------------------------------------------
+; Patch out known VDP and PSG accesses.
+; C register-indirect form is not used and does not have to be accomodated.
+; PSG is only accessed through OUT, so we save a few bytes of code not caring
+; if we actually see IN A, ($7F), because we don't.  Replace OUT A, ($7F) with
+; RST $20 ! NOP, and replace accesses to ports $BE and $BF with $A0 resp. $A1.
+; This doesn't account for weird stuff like writing to ports with OTIR, so any
+; special cases have to be handled manually; see above.
+; ----------------------------------------------------------------------------
+
+          xor       a                   ; Iterate through ROM
+          ld        de, 0x8000
+          ld        h, a
+          ld        l, a
+vdpatch:  ld        a, (hl)             ; Translate VDP calls from SG to Nabu
+vdpatch2: cp        0xD3                ; OUT (port), A
+          jr        z, vdpatch3
+          cp        0xDB                ; IN A, (port)
+          jr        nz, vdpatch5
+vdpatch3: inc       hl                  ; Tick down (that byte stays put)
+          dec       de
+          ld        a, (hl)             ; Get next byte, actual port number
+          cp        0x7F                ; PSG
+          jr        nz, vdpatch4        ; Not PSG; skip this block.
+          dec       hl                  ; Patch over the OUT.
+          ld        a, 0xE7             ; RST $20
+          ld        (hl), a
+          inc       hl
+          xor       a                   ; NOP
+          ld        (hl), a
+          jr        vdpatch5
+vdpatch4: cp        0xBE
+          jr        c, vdpatch6         ; <$BE; not us. (Do not tick down)
+          cp        0xC0
+          jr        nc, vdpatch6        ; >$BF; not us. (Do not tick down)
+          sub       a, 0x1E             ; Map SG port to Nabu port
+          ld        (hl), a             ; Put byte back
+vdpatch5: inc       hl                  ; Tick down
+          dec       de
+vdpatch6: ld        a, d                ; Are we done yet?
+          or        e
+          jr        nz, vdpatch         ; Go back, Jack, and do it again
+
+; ----------------------------------------------------------------------------
+; Get the RST18 handler out of the way so we can slap in an RST20 handler.
+; ----------------------------------------------------------------------------
+
+          ld        a, 0xC3             ; JP
+          ld        (0x0018), a
+          ld        hl, fake0018        ; Address of our relocated RST18.
+          ld        (0x0019), hl
+
+; ----------------------------------------------------------------------------
+; Install our code to fake outputs to 7F.
+; ----------------------------------------------------------------------------
+
+          ld        a, 0xC3             ; JP
+          ld        (0x0020), a
+          ld        hl, fake7f          ; Address of the SN76489 emulator.
+          ld        (0x0021), hl
+
+; ----------------------------------------------------------------------------
+; Install patch to a function that uses OTIR to output to the SN76489.
+; ----------------------------------------------------------------------------
+
+          ld        a, 0xC3             ; JP
+          ld        (0x6AD1), a
+          ld        hl, fake6AD1        ; Address of our replacement function.
+          ld        (0x6AD2), hl
+
+; ----------------------------------------------------------------------------
+; Set up the PSG and its interrupt controller.
+; ----------------------------------------------------------------------------
+
+          call      initsnd             ; Initialize the PSG.
+          ld        c, 0x41
+          ld        a, 0x07             ; Enable write to port A via reg 7
+          out       (c), a
+          dec       c
+          in        a, (c)              ; Read current setting
+          or        c                   ; Optimization: C=$40
+          out       (c), a              ; Write it back with bit flipped on.
+          inc       c
+          ld        a, 0x0E             ; Select port A.
+          out       (c), a
+          dec       c
+          ld        a, 0x30             ; VBLANK or KBD
+          out       (c), a
+
+; ----------------------------------------------------------------------------
+; Install IRQ handler.  This replaces the IM1 (only thing you can do on an SG)
+; interrupt handler with an IM2 handler that can differentiate VBI from human
+; input interrupt, and vectors VBI into the IM1 handler.
+; ----------------------------------------------------------------------------
+
+          ld        a, 0x5E             ; Change IM 1 to IM 2.
+          ld        (0x0004), a
+          ld        a, 0xB0             ; input interrupt is xx04 followed
+          ld        i, a                ; immediately by VBI (where xx=I).
+
+; ----------------------------------------------------------------------------
+; Miscellaneous patches.
+; ----------------------------------------------------------------------------
+
+          xor       a                   ; NOP
+          ld        (0x0084), a
+          ld        (0x0085), a
+
+; ----------------------------------------------------------------------------
+; Our work here is done.
+; ----------------------------------------------------------------------------
+
+          call      unsplash
+          rst       0x00                ; Jump into the original code.
+
+; ----------------------------------------------------------------------------
+; New joystick routine.
+;
+; As with the relocatable code above, we need to make the assembler generate
+; to a address base not linear with our own; we set it at the beginning and
+; unset it and the end.
+; ----------------------------------------------------------------------------
+
+njoyrtn:  org       0x0A4D
+L0A4D:    call      procjoy
+          ld        a, (0xC000)
+          bit       0, a
+          jp        nz, L0A5B
+          ld        a, (joy1)
+          ld        (0xC009), a
+          ret       
+L0A5B:    ld        a, (joy1)
+          or        0xC0
+          ld        (0xC009), a
+          ld        c, a
+          ld        a, (joy1)
+          bit       5, a
+          jr        nz, L0A73
+          res       1, c
+L0A73:    ld        a, (joy1)
+          bit       5, a
+          jr        nz, L0A7F
+          res       2, c
+L0A7F:    ld        a, (joy1)
+          bit       5, a
+          jr        nz, L0A8B
+          res       3, c
+L0A8B:    bit       6, a
+          jr        nz, L0A91
+          res       0, c
+L0A91:    ld        a, (joy1)
+          bit       4, a
+          jr        nz, L0A9D
+          res       4, c
+L0A9D:    ld        a, (joy1)
+          bit       4, a
+          jr        nz, L0AA9
+          res       5, c
+L0AA9:    ld        a, c
+          ld        (0xC009), a
+          ret       
+njoylen:  equ       $-0x0A4D
+          org       njoyrtn+njoylen
+
+; ----------------------------------------------------------------------------
+; Unfinished release splash.
+; ----------------------------------------------------------------------------
+
+splash:   ld        a, 0x66
+          out       (0xA1), a
+          ld        a, 0x87
+          out       (0xA1), a
+          ret
+
+unsplash: ld        a, 0x22
+          out       (0xA1), a
+          ld        a, 0x87
+          out       (0xA1), a
+          ret
