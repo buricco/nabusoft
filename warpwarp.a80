@@ -14,7 +14,7 @@
 entry:    jp        entry2
           db        "(C) Namco | Conversion by S. V. Nickolas | NabuSoft"
 entry2:   di
-;         im        1
+         ;im        1
           ld        a, 0x66
           out       (0xA1), a
           ld        a, 0x87
@@ -28,15 +28,23 @@ entry2:   di
           ld        (0x0038), a
           ld        (0x0047), a
           ld        (0x004D), a
+          ld        (0x0053), a
+          ld        (0x0056), a
           ld        (0x005C), a
           ld        (0x0093), a
           ld        (0x0096), a
           ld        (0x013E), a
           ld        (0x0141), a
+          ld        hl, newirq
+          ld        (0x0039), hl
           ld        hl, wrtvdp
           ld        (0x0048), hl
           ld        hl, wrtvrm
           ld        (0x004E), hl
+          ld        hl, setwrt
+          ld        (0x0054), hl
+          ld        hl, filvrm
+          ld        (0x0057), hl
           ld        hl, ldirvm
           ld        (0x005D), hl
           ld        hl, wrtpsg
@@ -47,8 +55,6 @@ entry2:   di
           ld        (0x013F), hl
           ld        hl, snsmat
           ld        (0x0142), hl
-          ld        hl, newirq
-          ld        (0x0039), hl
 
           ld        c, 0x41
           ld        a, 0x07             ; Enable write to port A via reg 7
@@ -95,6 +101,27 @@ wrtvrm:   di
           ei
           ret
 
+setwrt:   di
+          ld        a, l
+          out       (0xA1), a
+          ld        a, h
+          and       0x3F
+          or        0x40
+          out       (0xA1), a
+          ei
+          ret
+
+filvrm:   push      af
+          call      setwrt
+          pop       af
+          di
+filvrm2:  out       (0xA0), a
+          dec       c
+          jr        nz, filvrm2
+          djnz      filvrm2
+          ei
+          ret
+
 ldirvm:   di
           ld        a, e
           out       (0xA1), a
@@ -134,12 +161,11 @@ rdpsg:    cp        0x0E
           in        a, (0x40)
           ret
 
-dojoy1:   call      newirq
+dojoy1:   call      joy
           ld        a, (joy1)
           ret
 
-dojoy2:   call      newirq
-          ld        a, 0x0F
+dojoy2:   ld        a, 0x0F
           ret
 
 rdvdp:    in        a, (0xA1)
@@ -149,25 +175,31 @@ snsmat:   xor       a                   ; Always no.
           cpl
           ret
 
-newirq:   push      af
-newirq2:  in        a, (0x91)
+newirq:   call      joy
+          ei
+          reti
+
+joy:      push      af
+joy2:     in        a, (0x91)
           bit       1, a
-          jp        z, newirq4
+          jp        z, joy4
           in        a, (0x90)
-          jr        newirq2
+          jr        joy2
 
-newirq3:  cp        0x80                ; Has one of the joysticks moved?
+joy3:     cp        0x80                ; Has one of the joysticks moved?
           jr        z, joy1r_1
-          jr        newirq2
+          jr        joy2
 
-newirq4:  pop       af
+joy4:     pop       af
           ret
 
-joy1r_1:  in        a, (0x90)
+joy1r_1:  in        a, (0x91)
+          bit       1, a
+          jp        z, joy1r_1
+          in        a, (0x90)
           push      bc
           ld        b, a
-          ld        a, (joy1)
-          or        0xE0
+          xor       a
           bit       3, b                ; Up
           jr        nz, joy1r_2
           or        0x01
@@ -185,8 +217,8 @@ joy1r_5:  bit       4, b                ; Fire
           or        0x10
 joy1r_6:  pop       bc
           ld        (joy1), a
-          jr        newirq2
+          jr        joy2
 
-joy1:     db        0x0F
+joy1:     db        0x00
 
 gamecode: 
