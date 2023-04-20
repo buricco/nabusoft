@@ -230,13 +230,20 @@ vbirq:    push      hl
           ei
           ret
 
-reset:    ld        a, 0x03
+reset:    di
+          ld        a, 0x03
           out       (0x00), a
           ld        a, 0xA0             ; VDP data port
           ld        (0x0006), a
           ld        (0x0007), a
           ld        a, 0xC9             ; RET
-          ld        (0xF9CA), a
+          ld        hl, 0xF9CA
+          ld        bc, 0x0230
+reset2:   ld        (hl), a
+          dec       c
+          inc       hl
+          jr        nz, reset2
+          djnz      reset2
           ld        a, 0xC3             ; JP
           ld        (0x0038), a
           ld        (0x0047), a
