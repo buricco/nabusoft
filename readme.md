@@ -86,7 +86,10 @@ to be accurate while Marduk takes a lot of shortcuts.
 
 ## Games included here?
 
+`frogger`: Frogger
+`pooyan`: Pooyan
 `warpwarp`: Galaxian, Tank Battalion, Warp & Warp (same stub for all 3)
+`zaxxon`: Zaxxon
 `zoom909`: Zoom 909 (*a.k.a.* Buck Rogers: Planet of Zoom)
 
 ## Games that *work?*

@@ -1,0 +1,290 @@
+; ============================================================================
+; Copyright 1982, 1985, 2023 Konami Digital Entertainment Co., Ltd.
+; MSX conversion by Hudson Soft (now Konami Digital Entertainment Co., Ltd.)
+; Nabu conversion by S. V. Nickolas/NergalSoft.
+; ============================================================================
+
+          org       0x0100
+start:    ex        de, hl              ; These three instructions will be
+          inc       bc                  ; interpreted on an x86 CPU as
+          ex        de, hl              ;   "jmp short entry16"
+          jr        entry8
+
+; ============================================================================
+; This chunk is 8086 code (in case executed from a PC).
+; ============================================================================
+
+entry16:  db        0xB4, 0x09          ; MOV AH, 0x09
+          db        0xBA                ; MOV DX, (word follows)
+          dw        msg
+          db        0xCD, 0x21          ; INT 0x21
+          db        0xB8, 0x01, 0x4C    ; MOV AX, 0x4C01
+          db        0xCD, 0x21          ; INT 0x21
+msg:      db        "This program is intended for CP/M-80.", 0x0D, 0x0A, 0x24
+
+; ============================================================================
+; Space waster.
+; ============================================================================
+
+          db        "Pooyan (C) 1982, 1985 Konami", 0x24
+
+; ============================================================================
+; This code must be placed at or above 0x0141.  Currently, it is at 0x0156.
+; ============================================================================
+
+entry8:   di
+          jp        reset
+
+wrtvdp:   di
+          ld        a, b
+          out       (0xA1), a
+          ld        a, c
+          or        0x80
+          out       (0xA1), a
+          ei
+          ret
+
+setwrt:   di
+          ld        a, l
+          out       (0xA1), a
+          ld        a, h
+          and       0x3F
+          or        0x40
+          out       (0xA1), a
+          ei
+          ret
+
+gicini:   ld        e, 0x00
+          ld        a, 0x08
+          call      wrtpsg
+          inc       a
+          call      wrtpsg
+          inc       a
+          call      wrtpsg
+          inc       a
+          ld        e, 0xB8
+          ld        a, 0x07             ; FALL INTO
+wrtpsg:   cp        0x20
+          ret       nc
+          di
+          out       (0x41), a
+          push      af
+          ld        a, e
+          out       (0x40), a
+          ei
+          pop       af
+          ret
+
+gtstck:   or        a
+          ret       z
+          cp        0x02
+          jr        c, gtstck1
+          jr        z, gtstck2
+          ret
+gtstck1:  ld        a, (stik1)
+          ret
+gtstck2:  ld        a, (stik2)
+          ret
+
+gttrig:   or        a
+          ret       z
+          cp        0x02
+          jr        c, gttrig1
+          jr        z, gttrig2
+          ret
+gttrig1:  ld        a, (trig1)
+          ret
+gttrig2:  ld        a, (trig2)
+          ret
+
+rdvdp:    in        a, (0xA1)
+          ret
+
+; ============================================================================
+; This code must be placed at 0x0200.
+; ============================================================================
+
+          ds        0x0200-$
+
+stik1:    db        0x00
+stik2:    db        0x00
+trig1:    db        0x00
+trig2:    db        0x00
+vkbirq:   dw        kbirq
+vvbirq:   dw        vbirq
+
+kbirq:    push      af
+          call      rdkb
+          pop       af
+          ret
+
+rdkb:     in        a, (0x91)
+          bit       1, a
+          ret       z
+          in        a, (0x90)
+          cp        0xE9                ; Pause up
+          jp        z, pause
+          cp        0x12                ; Ctrl-R
+          jp        z, reset
+          cp        0x80
+          ret       c                   ; Not joystick
+          cp        0x82
+          ret       nc                  ; Not joystick
+          and       0x01
+          jr        nz, joy2            ; FALL INTO
+
+; ============================================================================
+; GTSTCK returns -- Nabu masks  (0x10 = fire)
+;
+;    8 1 2          0x09 0x08 0x0C
+;     \|/
+;  7 <-o-> 3        0x01      0x04
+;     /|\
+;    6 5 4          0x03 0x02 0x06
+; ============================================================================
+
+joy1:     in        a, (0x91)
+          bit       1, a
+          jr        z, joy1
+          in        a, (0x90)
+          ld        b, a
+          xor       a
+          bit       4, b
+          jr        z, joy1_2
+          cpl
+joy1_2:   ld        (trig1), a
+          ld        a, b
+          and       0x0F
+          ld        e, a
+          ld        d, 0x00
+          ld        hl, stable
+          add       hl, de
+          ld        a, (hl)
+          ld        (stik1), a
+          ei
+          reti
+          
+joy2:     in        a, (0x91)
+          bit       1, a
+          jr        z, joy2
+          in        a, (0x90)
+          ld        b, a
+          xor       a
+          bit       4, b
+          jr        z, joy2_2
+          cpl
+joy2_2:   ld        (trig1), a
+          ld        a, b
+          and       0x0F
+          ld        e, a
+          ld        d, 0x00
+          ld        hl, stable
+          add       hl, de
+          ld        a, (hl)
+          ld        (stik1), a
+          ei
+          reti
+
+stable:   db        0, 7, 5, 6, 3, 0, 4, 0
+          db        1, 8, 0, 0, 2, 0, 0, 0
+
+pause:    push      af
+          ld        a, 0x23
+          out       (0x00), a
+pause2:   in        a, (0x91)
+          bit       1, a
+          jr        z, pause2
+          in        a, (0x90)
+          cp        0xE9
+          jr        z, pause2
+          ld        a, 0x03
+          out       (0x00), a
+          pop       af
+          ret
+
+vbirq:    push      hl
+          push      de
+          push      bc
+          push      af
+          exx
+          ex        af, af'
+          push      hl
+          push      de
+          push      bc
+          push      af
+          push      iy
+          push      ix
+          call      0xFD9A
+          pop       ix
+          pop       iy
+          pop       af
+          pop       bc
+          pop       de
+          pop       hl
+          exx
+          ex        af, af'
+          pop       af
+          pop       bc
+          pop       de
+          pop       hl
+          ei
+          ret
+
+reset:    ld        a, 0x03
+          out       (0x00), a
+          ld        a, 0xA0             ; VDP data port
+          ld        (0x0006), a
+          ld        (0x0007), a
+          ld        a, 0xC9             ; RET
+          ld        (0xF9CA), a
+          ld        a, 0xC3             ; JP
+          ld        (0x0038), a
+          ld        (0x0047), a
+          ld        (0x0053), a
+          ld        (0x0090), a
+          ld        (0x0093), a
+          ld        (0x00D5), a
+          ld        (0x00D8), a
+          ld        (0x013E), a
+          ld        hl, vbirq
+          ld        (0x0039), hl
+          ld        hl, wrtvdp
+          ld        (0x0048), hl
+          ld        hl, setwrt
+          ld        (0x0054), hl
+          ld        hl, gicini
+          ld        (0x0091), hl
+          ld        hl, wrtpsg
+          ld        (0x0094), hl
+          ld        hl, gtstck
+          ld        (0x00D6), hl
+          ld        hl, gttrig
+          ld        (0x00D9), hl
+          ld        hl, rdvdp
+          ld        (0x013F), hl
+          ld        bc, 0x4000
+          ld        de, 0x7FFF
+          ld        hl, gamecode+0x3FFF
+          lddr
+          ld        a, 0x02
+          ld        i, a
+          im        2
+          ld        a, 0x01
+          ld        i, a
+          ld        c, 0x41
+          ld        a, 0x07             ; Enable write to port A via reg 7
+          out       (c), a
+          dec       c
+          in        a, (c)              ; Read current setting
+          or        c                   ; Optimization: C=$40
+          out       (c), a              ; Write it back with bit flipped on.
+          inc       c
+          ld        a, 0x0E             ; Select port A.
+          out       (c), a
+          dec       c
+          ld        a, 0x30             ; VBLANK and keyboard only.
+          out       (c), a
+          ld        hl, (0x4002)
+          jp        (hl)
+
+gamecode: incbin    "pooyan.rom"

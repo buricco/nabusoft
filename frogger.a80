@@ -1,0 +1,337 @@
+; ============================================================================
+; Copyright 1981, 1983, 2023 Konami Digital Entertainment Co., Ltd.
+; MSX conversion by Konami.
+; Nabu conversion by S. V. Nickolas/NergalSoft.
+; ============================================================================
+
+          org       0x0100
+start:    ex        de, hl              ; These three instructions will be
+          inc       bc                  ; interpreted on an x86 CPU as
+          ex        de, hl              ;   "jmp short entry16"
+          jr        entry8
+
+; ============================================================================
+; This chunk is 8086 code (in case executed from a PC).
+; ============================================================================
+
+entry16:  db        0xB4, 0x09          ; MOV AH, 0x09
+          db        0xBA                ; MOV DX, (word follows)
+          dw        msg
+          db        0xCD, 0x21          ; INT 0x21
+          db        0xB8, 0x01, 0x4C    ; MOV AX, 0x4C01
+          db        0xCD, 0x21          ; INT 0x21
+msg:      db        "This program is intended for CP/M-80.", 0x0D, 0x0A, 0x24
+
+; ============================================================================
+; End of 8086 code.
+; ============================================================================
+
+entry8:   di
+          ld        a, 0x03             ; Shut off the LEDs
+          out       (0x00), a
+          ld        sp, 0xA000
+          ld        a, 0x02
+          ld        i, a
+          call      splash
+          call      setup
+          ld        hl, (0x4002)
+          jp        (hl)
+
+; ============================================================================
+; Keyboard handler.
+; ============================================================================
+
+kbirq:    push      af
+          in        a, (0x91)
+          bit       1, a
+          jr        z, kbirq
+          in        a, (0x90)
+          cp        0x80
+          jr        c, stdkey
+          jr        z, joy1
+          cp        0x81
+          jr        z, joy2
+          jp        kspecial
+
+stdkey:   ld        (lastkey), a
+          jr        exitirq
+
+joy1:     in        a, (0x91)
+          bit       1, a
+          jr        z, joy1
+          in        a, (0x90)
+          ld        (lastjoy1), a
+          jr        exitirq
+
+joy2:     in        a, (0x91)
+          bit       1, a
+          jr        z, joy2
+          in        a, (0x90)
+          ld        (lastjoy2), a
+exitirq:  pop       af
+          ei
+          ret
+
+kspecial: cp        0xE0
+          jr        c, exitirq
+          jr        z, mkrt
+          cp        0xE2
+          jr        c, mklt
+          jr        z, mkup
+          cp        0xE3
+          jr        z, mkdn
+          cp        0xF0
+          jr        c, exitirq
+          jr        z, bkrt
+          cp        0xF2
+          jr        c, bklt
+          jr        z, bkup
+          cp        0xF4
+          jr        c, bkdn
+          jr        exitirq
+mkup:     ld        a, (lastarr)
+          or        0x08
+          ld        (lastarr), a
+          jr        exitirq
+mkdn:     ld        a, (lastarr)
+          or        0x02
+          ld        (lastarr), a
+          jr        exitirq
+mklt:     ld        a, (lastarr)
+          or        0x01
+          ld        (lastarr), a
+          jr        exitirq
+mkrt:     ld        a, (lastarr)
+          or        0x04
+          ld        (lastarr), a
+          jr        exitirq
+bkup:     ld        a, (lastarr)
+          and       0xF7
+          ld        (lastarr), a
+          jr        exitirq
+bkdn:     ld        a, (lastarr)
+          and       0xFD
+          ld        (lastarr), a
+          jr        exitirq
+bklt:     ld        a, (lastarr)
+          and       0xFE
+          ld        (lastarr), a
+          jr        exitirq
+bkrt:     ld        a, (lastarr)
+          and       0xFC
+          ld        (lastarr), a
+          jr        exitirq
+
+lastjoy1: db        0x00
+lastjoy2: db        0x00
+lastkey:  db        0x00
+lastarr:  db        0x00
+
+          ds        0x0200-$
+
+          dw        0x0000              ; Unused IRQ vector.
+          dw        0x0000              ; Unused IRQ vector.
+vkbirq:   dw        kbirq
+vvbirq:   dw        vbirq
+
+vbirq:    push      hl
+          push      de
+          push      bc
+          push      af
+          exx
+          ex        af, af'
+          push      hl
+          push      de
+          push      bc
+          push      af
+          push      iy
+          push      ix
+          call      0xFD9A
+          pop       ix
+          pop       iy
+          pop       af
+          pop       bc
+          pop       de
+          pop       hl
+          exx
+          ex        af, af'
+          pop       af
+          pop       bc
+          pop       de
+          pop       hl
+          ei
+          ret
+
+setup:    ld        hl, gamecode
+          ld        de, 0x4000          ; target address
+          ld        bc, gamelen
+          ldir
+          
+          ld        a, 0x01
+          ld        i, a
+          ld        c, 0x41
+          ld        a, 0x07             ; Enable write to port A via reg 7
+          out       (c), a
+          dec       c
+          in        a, (c)              ; Read current setting
+          or        c                   ; Optimization: C=$40
+          out       (c), a              ; Write it back with bit flipped on.
+          inc       c
+          ld        a, 0x0E             ; Select port A.
+          out       (c), a
+          dec       c
+          ld        a, 0x30             ; VBLANK and keyboard only.
+          out       (c), a
+          ld        a, 0x5E             ; turn "IM 1" into "IM 2"
+          ld        (0x41E0), a
+
+; ============================================================================
+; Patch out known VDP and PSG accesses.
+; ============================================================================
+
+          ld        bc, gamelen
+          ld        hl, 0x4000
+vdpatch:  ld        a, (hl)             ; Translate VDP calls from SG to Nabu
+vdpatch2: cp        0xD3                ; OUT (port), A
+          jr        z, vdpatch3
+          cp        0xDB                ; IN A, (port)
+          jr        nz, vdpatch7
+vdpatch3: inc       hl                  ; Tick down (that byte stays put)
+          dec       de
+          ld        a, (hl)             ; Get next byte, actual port number
+          cp        0x98                ; VDP Data
+          jr        z, vdpatch5
+          cp        0x99                ; VDP Address
+          jr        z, vdpatch5
+          cp        0xA0                ; PSG Register
+          jr        z, vdpatch4
+          cp        0xA1                ; PSG Data
+          jr        z, vdpatch4
+          jr        vdpatch7
+vdpatch4: xor       0x01
+          sub       a, 0x60
+          jr        vdpatch6
+vdpatch5: add       a, 0x08
+vdpatch6: ld        (hl), a             ; Put byte back
+vdpatch7: inc       hl                  ; Tick down
+          dec       c
+          jr        nz, vdpatch
+          djnz      vdpatch
+          ret
+
+; ============================================================================
+; Startup banner.
+; ============================================================================
+
+splash:   ld        a, 0x0B
+          out       (0x00), a
+          ld        b, 0x08             ; Set video mode
+          ld        hl, grregs
+          ld        c, 0x80
+splash1:  ld        a, (hl)
+          out       (0xA1), a
+          ld        a, c
+          out       (0xA1), a
+          inc       hl
+          inc       c
+          djnz      splash1
+          xor       a                   ; Zot memory
+          out       (0xA1), a
+          ld        a, 0x40
+          out       (0xA1), a
+          ld        b, a
+          xor       a
+          ld        c, a
+splash2:  out       (0xA0), a
+          dec       c
+          jr        nz, splash2
+          djnz      splash2
+          ld        a, 0x08
+          out       (0xA1), a
+          ld        a, 0x4A
+          out       (0xA1), a
+          ld        hl, abc
+          ld        b, 0xD0
+splash3:  ld        a, (hl)
+          out       (0xA0), a
+          inc       hl
+          djnz      splash3
+          ld        a, 0x60
+          out       (0xA1), a
+          ld        a, 0x55
+          out       (0xA1), a
+          ld        hl, nergal
+splash4:  ld        a, (hl)
+          or        a
+          jr        z, splash5
+          out       (0xA0), a
+          inc       hl
+          jr        splash4
+splash5:  xor       a
+          out       (0xA1), a
+          ld        a, 0x60
+          out       (0xA1), a
+          ld        a, 0x21             ; Green text
+          ld        b, 0x20
+splash6:  out       (0xA0), a
+          or        a
+          djnz      splash6
+          ld        a, 0x03
+          out       (0x00), a
+          xor       a
+          ld        b, 0x08
+          ld        d, a
+          ld        e, a
+splash7:  dec       de
+          ld        a, d
+          or        e
+          jr        nz, splash7
+          djnz      splash7
+          xor       a
+          out       (0xA1), a
+          ld        a, 0x60
+          out       (0xA1), a
+          xor       a
+          ld        b, 0x20
+splash8:  out       (0xA0), a
+          or        a
+          djnz      splash8
+          ret
+
+nergal:   db        "    CONVERSION BY NERGALSOFT    ", 0
+
+grregs:   db        0x00, 0xC0, 0x05, 0x80, 0x01, 0x20, 0x00, 0xF1
+
+; ============================================================================
+; Frogger does not have a full font.  Taken from Athletic Land instead.
+; ============================================================================
+
+abc:      db        0x1C, 0x36, 0x63, 0x63, 0x7F, 0x63, 0x63, 0x00
+          db        0x7E, 0x63, 0x63, 0x7E, 0x63, 0x63, 0x7E, 0x00
+          db        0x3E, 0x63, 0x60, 0x60, 0x60, 0x63, 0x3E, 0x00
+          db        0x7C, 0x66, 0x63, 0x63, 0x63, 0x66, 0x7C, 0x00
+          db        0x7F, 0x60, 0x60, 0x7E, 0x60, 0x60, 0x7F, 0x00
+          db        0x7F, 0x60, 0x60, 0x7E, 0x60, 0x60, 0x60, 0x00
+          db        0x3E, 0x63, 0x60, 0x67, 0x63, 0x63, 0x3F, 0x00
+          db        0x63, 0x63, 0x63, 0x7F, 0x63, 0x63, 0x63, 0x00
+          db        0x3C, 0x18, 0x18, 0x18, 0x18, 0x18, 0x3C, 0x00
+          db        0x1F, 0x06, 0x06, 0x06, 0x06, 0x66, 0x3C, 0x00
+          db        0x63, 0x66, 0x6C, 0x78, 0x7C, 0x6E, 0x67, 0x00
+          db        0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x7F, 0x00
+          db        0x63, 0x77, 0x7F, 0x7F, 0x6B, 0x63, 0x63, 0x00
+          db        0x63, 0x73, 0x7B, 0x7F, 0x6F, 0x67, 0x63, 0x00
+          db        0x3E, 0x63, 0x63, 0x63, 0x63, 0x63, 0x3E, 0x00
+          db        0x7E, 0x63, 0x63, 0x63, 0x7E, 0x60, 0x60, 0x00
+          db        0x3E, 0x63, 0x63, 0x63, 0x6F, 0x66, 0x3D, 0x00
+          db        0x7E, 0x63, 0x63, 0x62, 0x7C, 0x66, 0x63, 0x00
+          db        0x3E, 0x63, 0x60, 0x3E, 0x03, 0x63, 0x3E, 0x00
+          db        0x7E, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x00
+          db        0x63, 0x63, 0x63, 0x63, 0x63, 0x63, 0x3E, 0x00
+          db        0x63, 0x63, 0x63, 0x63, 0x36, 0x1C, 0x08, 0x00
+          db        0x63, 0x63, 0x6B, 0x6B, 0x7F, 0x77, 0x22, 0x00
+          db        0x63, 0x76, 0x3C, 0x1C, 0x1E, 0x37, 0x63, 0x00
+          db        0x66, 0x66, 0x7E, 0x3C, 0x18, 0x18, 0x18, 0x00
+          db        0x7F, 0x07, 0x0E, 0x1C, 0x38, 0x70, 0x7F, 0x00
+
+gamecode: incbin    "frogger.rom"       ; 97E2FCB4
+gamelen:  equ       $-gamecode
