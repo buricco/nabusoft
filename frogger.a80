@@ -29,23 +29,25 @@ msg:      db        "This program is intended for CP/M-80.", 0x0D, 0x0A, 0x24
 entry8:   di
           ld        a, 0x03             ; Shut off the LEDs
           out       (0x00), a
-          ld        sp, 0xA000
-          ld        a, 0x02
+          ld        sp, 0xA000          ; Set a sane stack pointer
+          ld        a, 0x02             ; Interrupt vector in page 0x02
           ld        i, a
-          call      splash
-          call      setup
-          ld        hl, (0x4002)
-          jp        (hl)
+          call      splash              ; Show "Conversion by Nergalsoft" msg.
+          call      setup               ; Adapt the ROM to the Nabu
+          ld        hl, (0x4002)        ; Find initial IP from the header
+          jp        (hl)                ; Enter game code
 
 ; ============================================================================
 ; Keyboard handler.
 ; ============================================================================
 
 kbirq:    push      af
-          in        a, (0x91)
+kbirq2:   in        a, (0x91)
           bit       1, a
-          jr        z, kbirq
+          jr        z, kbirq2
           in        a, (0x90)
+          cp        0x94                ; Heartbeat
+          jr        z, exitirq          ; Yes, ignore
           cp        0x80
           jr        c, stdkey
           jr        z, joy1
@@ -165,7 +167,7 @@ vbirq:    push      hl
 setup:    ld        hl, gamecode
           ld        de, 0x4000          ; target address
           ld        bc, gamelen
-          ldir
+          ldir                          ; will only work if file < 16128 bytes
           
           ld        c, 0x41
           ld        a, 0x07             ; Enable write to port A via reg 7
@@ -186,6 +188,8 @@ setup:    ld        hl, gamecode
 
 ; ============================================================================
 ; Patch out known VDP and PSG accesses.
+; POTENTIAL GOTCHA: C indirect register accesses detected at the following:
+;                   4152 415E 4165 41A7 
 ; ============================================================================
 
           ld        bc, gamelen
@@ -216,6 +220,82 @@ vdpatch7: inc       hl                  ; Tick down
           dec       c
           jr        nz, vdpatch
           djnz      vdpatch
+          ld        a, 0x40             ; PSG port swap
+          ld        (0x4119), a
+          ld        (0x4146), a
+          ld        (0x5831), a
+          inc       a
+          ld        (0x582D), a
+
+; ============================================================================
+; Additional patches
+; ============================================================================
+
+; ----------------------------------------------------------------------------
+; 45FD: looks like Konami's version of SMSMAT.
+; ----------------------------------------------------------------------------
+
+          ld        a, 0x3E             ; LD A, #
+          ld        (0x45FD), a
+          ld        a, 0xFF
+          ld        (0x45FE), a
+          ld        a, 0xC9             ; RET
+          ld        (0x45FF), a
+
+; ----------------------------------------------------------------------------
+; Attract mode keyboard poll/read.  Redirect to the appropriate translator.
+; ----------------------------------------------------------------------------
+
+          ld        hl, attrkey
+          ld        (0x42F8), hl
+          ld        hl, attrpoll
+          ld        (0x42C0), hl
+          ld        (0x4519), hl
+
+; ============================================================================
+; Done hacking; return to main code
+; ============================================================================
+
+          ret
+
+; ============================================================================
+; GRAFT: Attract mode keyboard read.
+; ============================================================================
+
+attrkeys: db        0xFD, 0xFB, 0xF7, 0xEF
+attrkey:  ld        a, (lastkey)
+          cp        '1'
+          jr        c, attrkey2         ; Less; return 0xFF
+          cp        '5'
+          jr        nc, attrkey2        ; Not less; return 0xFF
+          push      hl                  ; Index convert
+          push      de
+          sub       a, '1'
+          ld        hl, attrkeys
+          ld        d, 0
+          ld        e, a
+          add       hl, de
+          xor       a                   ; Acknowledge key press
+          ld        (lastkey), a
+          ld        a, (hl)
+          pop       de
+          pop       hl
+          ret
+attrkey2: ld        a, 0xFF
+          ret
+
+; ============================================================================
+; GRAFT: Attract mode keyboard poll.
+; ============================================================================
+
+attrpoll: ld        a, (lastkey)        ; Has key "1-4" been pressed?
+          cp        '1'
+          jr        c, attrpol2         ; Too low, return 0xFF
+          cp        '5'
+          jr        nc, attrpol2        ; Too high, return 0xFF
+          xor       a                   ; Yes, return 0x00
+          ret
+attrpol2: ld        a, 0xFF
           ret
 
 ; ============================================================================
