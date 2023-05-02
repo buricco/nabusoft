@@ -30,8 +30,6 @@ entry8:   di
           ld        a, 0x03             ; Shut off the LEDs
           out       (0x00), a
           ld        sp, 0xA000          ; Set a sane stack pointer
-          ld        a, 0x02             ; Interrupt vector in page 0x02
-          ld        i, a
           call      splash              ; Show "Conversion by Nergalsoft" msg.
           call      setup               ; Adapt the ROM to the Nabu
 reset:    ld        hl, (0x4002)        ; Find initial IP from the header
@@ -55,6 +53,8 @@ kbirq2:   in        a, (0x91)
           jr        z, joy1
           cp        0x81
           jr        z, joy2
+          cp        0xF9
+          jp        z, pause
           jr        kspecial
 
 stdkey:   ld        (lastkey), a
@@ -182,6 +182,8 @@ setup:    ld        hl, gamecode
           dec       c
           ld        a, 0x30             ; VBLANK and keyboard only.
           out       (c), a
+          ld        a, 0x02             ; Interrupt vector in page 0x02
+          ld        i, a
           im        2
           ld        a, 0x5E             ; turn "IM 1" into "IM 2"
           ld        (0x41E0), a
@@ -262,6 +264,22 @@ vdpatch7: inc       hl                  ; Tick down
 ; ============================================================================
 
           ret
+
+; ============================================================================
+; Pause key handler.
+; ============================================================================
+
+pause:    ld        a, 0x23             ; Turn on the pause light
+          out       (0x00), a
+pause2:   in        a, (0x91)           ; Wait for key
+          bit       1, a
+          jr        z, pause2
+          in        a, (0x90)           ; Read it
+          cp        0xF9                ; Pause key break code
+          jr        nz, pause2          ; No, keep waiting
+          ld        a, 0x03             ; Turn off the pause light
+          out       (0x00), a
+          jp        exitirq             ; Leave the IRQ handler.
 
 ; ============================================================================
 ; GRAFT: Attract mode keyboard read.
