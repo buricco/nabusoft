@@ -167,8 +167,6 @@ setup:    ld        hl, gamecode
           ld        bc, gamelen
           ldir
           
-          ld        a, 0x01
-          ld        i, a
           ld        c, 0x41
           ld        a, 0x07             ; Enable write to port A via reg 7
           out       (c), a
@@ -182,6 +180,7 @@ setup:    ld        hl, gamecode
           dec       c
           ld        a, 0x30             ; VBLANK and keyboard only.
           out       (c), a
+          im        2
           ld        a, 0x5E             ; turn "IM 1" into "IM 2"
           ld        (0x41E0), a
 
