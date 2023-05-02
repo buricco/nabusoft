@@ -4,6 +4,11 @@
 ; Nabu conversion by S. V. Nickolas/NergalSoft.
 ; ============================================================================
 
+; ============================================================================
+; Known Unknowns:
+;   How does the code tell us which joystick to poll?
+; ============================================================================
+
           org       0x0100
 start:    ex        de, hl              ; These three instructions will be
           inc       bc                  ; interpreted on an x86 CPU as
@@ -92,35 +97,35 @@ kspecial: cp        0xE0
           jr        c, bkdn
           jr        exitirq
 mkup:     ld        a, (lastarr)
-          or        0x08
+          or        0x20
           ld        (lastarr), a
           jr        exitirq
 mkdn:     ld        a, (lastarr)
-          or        0x02
+          or        0x40
           ld        (lastarr), a
           jr        exitirq
 mklt:     ld        a, (lastarr)
-          or        0x01
+          or        0x10
           ld        (lastarr), a
           jr        exitirq
 mkrt:     ld        a, (lastarr)
-          or        0x04
+          or        0x80
           ld        (lastarr), a
           jr        exitirq
 bkup:     ld        a, (lastarr)
-          and       0xF7
+          and       0xDF
           ld        (lastarr), a
           jr        exitirq
 bkdn:     ld        a, (lastarr)
-          and       0xFD
+          and       0xBF
           ld        (lastarr), a
           jr        exitirq
 bklt:     ld        a, (lastarr)
-          and       0xFE
+          and       0xEF
           ld        (lastarr), a
           jr        exitirq
 bkrt:     ld        a, (lastarr)
-          and       0xFC
+          and       0x7F
           ld        (lastarr), a
           jr        exitirq
 
@@ -243,7 +248,7 @@ vdpatch7: inc       hl                  ; Tick down
           ld        (0x45FF), a
 
 ; ----------------------------------------------------------------------------
-; Attract mode keyboard poll/read.  Redirect to the appropriate translator.
+; Keyboard poll/read traps.  Redirect to the appropriate translator.
 ; ----------------------------------------------------------------------------
 
           ld        hl, attrkey
@@ -251,6 +256,11 @@ vdpatch7: inc       hl                  ; Tick down
           ld        hl, attrpoll
           ld        (0x42C0), hl
           ld        (0x4519), hl
+          ld        hl, gamekey
+          ld        (0x404E), hl
+          ld        (0x4609), hl
+          ld        hl, joytran
+          ld        (0x4038), hl
 
 ; ============================================================================
 ; Done hacking; return to main code
@@ -296,6 +306,40 @@ attrpoll: ld        a, (lastkey)        ; Has key "1-4" been pressed?
           xor       a                   ; Yes, return 0x00
           ret
 attrpol2: ld        a, 0xFF
+          ret
+
+; ============================================================================
+; GRAFT: Play mode keyboard read.
+; ============================================================================
+
+gamekey:  ld        a, (lastarr)
+          cpl
+          ret
+
+; ============================================================================
+; GRAFT: Read joystick.  XXX: How do we know which one?
+; ============================================================================
+
+joytran:  push      bc
+          ld        a, (lastjoy1)       ; Combine both controllers (XXX)
+          ld        b, a
+          ld        a, (lastjoy2)
+          or        b
+          ld        b, a
+          ld        a, 0x3F
+          bit       0, b                ; Left
+          jr        z, joytran2
+          and       0x3B
+joytran2: bit       1, b                ; Down
+          jr        z, joytran3
+          and       0x3D
+joytran3: bit       2, b                ; Right
+          jr        z, joytran4
+          and       0x37
+joytran4: bit       3, b                ; Up
+          jr        z, joytran5
+          and       0x3E
+joytran5: pop       bc
           ret
 
 ; ============================================================================
