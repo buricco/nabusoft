@@ -4,11 +4,6 @@
 ; Nabu conversion by S. V. Nickolas/NergalSoft.
 ; ============================================================================
 
-; ============================================================================
-; Known Unknowns:
-;   How does the code tell us which joystick to poll?
-; ============================================================================
-
           org       0x0100
 start:    ex        de, hl              ; These three instructions will be
           inc       bc                  ; interpreted on an x86 CPU as
@@ -39,7 +34,7 @@ entry8:   di
           ld        i, a
           call      splash              ; Show "Conversion by Nergalsoft" msg.
           call      setup               ; Adapt the ROM to the Nabu
-          ld        hl, (0x4002)        ; Find initial IP from the header
+reset:    ld        hl, (0x4002)        ; Find initial IP from the header
           jp        (hl)                ; Enter game code
 
 ; ============================================================================
@@ -53,12 +48,14 @@ kbirq2:   in        a, (0x91)
           in        a, (0x90)
           cp        0x94                ; Heartbeat
           jr        z, exitirq          ; Yes, ignore
+          cp        0x12                ; Ctrl-R
+          jr        z, reset
           cp        0x80
           jr        c, stdkey
           jr        z, joy1
           cp        0x81
           jr        z, joy2
-          jp        kspecial
+          jr        kspecial
 
 stdkey:   ld        (lastkey), a
           jr        exitirq
@@ -129,15 +126,13 @@ bkrt:     ld        a, (lastarr)
           ld        (lastarr), a
           jr        exitirq
 
-lastjoy1: db        0x00
-lastjoy2: db        0x00
+          ds        0x0200-$
+
+lastjoy1: db        0x00                ; These 4 variables double for 2
+lastjoy2: db        0x00                ;   unused IRQ vectors.
 lastkey:  db        0x00
 lastarr:  db        0x00
 
-          ds        0x0200-$
-
-          dw        0x0000              ; Unused IRQ vector.
-          dw        0x0000              ; Unused IRQ vector.
 vkbirq:   dw        kbirq
 vvbirq:   dw        vbirq
 
@@ -317,29 +312,31 @@ gamekey:  ld        a, (lastarr)
           ret
 
 ; ============================================================================
-; GRAFT: Read joystick.  XXX: How do we know which one?
+; GRAFT: Read joystick.
 ; ============================================================================
 
 joytran:  push      bc
-          ld        a, (lastjoy1)       ; Combine both controllers (XXX)
-          ld        b, a
-          ld        a, (lastjoy2)
-          or        b
-          ld        b, a
+          ld        a, (0xE001)         ; Which player?
+          bit       0, a
+          jr        nz, joytran2        ; Reset: player 1.  Set: player 2
+          ld        a, (lastjoy1)
+          jr        joytran3
+joytran2: ld        a, (lastjoy2)
+joytran3: ld        b, a
           ld        a, 0x3F
           bit       0, b                ; Left
-          jr        z, joytran2
-          and       0x3B
-joytran2: bit       1, b                ; Down
-          jr        z, joytran3
-          and       0x3D
-joytran3: bit       2, b                ; Right
           jr        z, joytran4
-          and       0x37
-joytran4: bit       3, b                ; Up
+          and       0x3B
+joytran4: bit       1, b                ; Down
           jr        z, joytran5
+          and       0x3D
+joytran5: bit       2, b                ; Right
+          jr        z, joytran6
+          and       0x37
+joytran6: bit       3, b                ; Up
+          jr        z, joytran7
           and       0x3E
-joytran5: pop       bc
+joytran7: pop       bc
           ret
 
 ; ============================================================================
