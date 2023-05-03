@@ -49,13 +49,13 @@ kbirq:    push      af
           jr        z, joy2
           cp        0x94                ; Heartbeat
           jr        z, exitirq          ; Yes, ignore
-          cp        0x12                ; Ctrl-R
-          jr        z, reset
           cp        0xF9
           jp        z, pause
           jr        kspecial
 
-stdkey:   ld        (lastkey), a
+stdkey:   cp        0x12                ; Ctrl-R
+          jr        z, reset
+          ld        (lastkey), a
           jr        exitirq
 
 joy1:     in        a, (0x90)
