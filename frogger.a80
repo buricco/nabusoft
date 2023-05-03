@@ -60,17 +60,15 @@ kbirq2:   in        a, (0x91)
 stdkey:   ld        (lastkey), a
           jr        exitirq
 
-joy1:     in        a, (0x91)
-          bit       1, a
+joy1:     in        a, (0x90)
+          cp        0x80
           jr        z, joy1
-          in        a, (0x90)
           ld        (lastjoy1), a
           jr        exitirq
 
-joy2:     in        a, (0x91)
-          bit       1, a
+joy2:     in        a, (0x90)
+          cp        0x81
           jr        z, joy2
-          in        a, (0x90)
           ld        (lastjoy2), a
 exitirq:  pop       af
           ei
@@ -270,13 +268,6 @@ vdpatch7: inc       hl                  ; Tick down
           ld        (0x419C), a
           ld        (0x41EF), a
           ld        (0x5839), a
-;         ld        a, 0xC3             ; JP
-;         ld        (0x414D), a
-;         ld        (0x41A5), a
-;         ld        hl, new414D
-;         ld        (0x414E), hl
-;         ld        hl, new41A5
-;         ld        (0x41A6), hl
           
 ; ----------------------------------------------------------------------------
 ; Disable writes to port B.
