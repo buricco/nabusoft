@@ -73,7 +73,7 @@ joy2:     in        a, (0x91)
           in        a, (0x90)
           ld        (lastjoy2), a
 exitirq:  pop       af
-badirq:   ei
+          ei
           reti
 
 kspecial: cp        0xE0
@@ -164,6 +164,9 @@ vbirq:    push      hl
           pop       de
           pop       hl
           ei
+          reti
+
+badirq:   ei
           reti
 
 setup:    ld        hl, gamecode
@@ -261,11 +264,29 @@ vdpatch7: inc       hl                  ; Tick down
 ; Konami code sets port A to WRITABLE, this is the thing that should not be.
 ; ----------------------------------------------------------------------------
 
-          ld        a, 0xE8
+          ld        a, 0x68
           ld        (0x415D), a
-          ld        a, 0xF8
+          ld        a, 0x78
           ld        (0x419C), a
           ld        (0x41EF), a
+          ld        (0x5839), a
+;         ld        a, 0xC3             ; JP
+;         ld        (0x414D), a
+;         ld        (0x41A5), a
+;         ld        hl, new414D
+;         ld        (0x414E), hl
+;         ld        hl, new41A5
+;         ld        (0x41A6), hl
+          
+; ----------------------------------------------------------------------------
+; Disable writes to port B.
+; ----------------------------------------------------------------------------
+
+          xor       a
+          ld        (0x41D9), a
+          ld        (0x41DA), a
+          ld        (0x445F), a
+          ld        (0x4460), a
 
 ; ============================================================================
 ; Done hacking; return to main code
@@ -363,6 +384,36 @@ joytran6: bit       3, b                ; Up
           jr        z, joytran7
           and       0x3E
 joytran7: pop       bc
+          ret
+
+; ============================================================================
+; PATCH: Prevent certain bits from being written to port 7.
+; ============================================================================
+
+new414D:  cp        0x0E
+          jp        z, 0x4167
+          out       (0x41), a
+          cp        0x07
+          ld        a, (hl)
+          jr        z, new414D2
+          and       7
+          jr        new414D3
+new414D2: and       0x7F
+          or        0x40
+new414D3: out       (c), a
+          jp        0x4154
+          
+new41A5:  cp        0x07
+          jr        nz, new41A52
+          cp        0x0E
+          ret       z
+          ld        a, b
+          and       0x7F
+          or        0x40
+          ld        b, a
+          ld        a, 0x07
+new41A52: out       (0x41), a
+          out       (c), b
           ret
 
 ; ============================================================================
