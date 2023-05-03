@@ -2,6 +2,7 @@
 ; Copyright 1981, 1983, 2023 Konami Digital Entertainment Co., Ltd.
 ; MSX conversion by Konami.
 ; Nabu conversion by S. V. Nickolas/NergalSoft.
+;   Special thanks: productiondave, MacGyver75
 ; ============================================================================
 
           org       0x0100
@@ -40,19 +41,16 @@ reset:    ld        hl, (0x4002)        ; Find initial IP from the header
 ; ============================================================================
 
 kbirq:    push      af
-kbirq2:   in        a, (0x91)
-          bit       1, a
-          jr        z, kbirq2
           in        a, (0x90)
-          cp        0x94                ; Heartbeat
-          jr        z, exitirq          ; Yes, ignore
-          cp        0x12                ; Ctrl-R
-          jr        z, reset
           cp        0x80
           jr        c, stdkey
           jr        z, joy1
           cp        0x81
           jr        z, joy2
+          cp        0x94                ; Heartbeat
+          jr        z, exitirq          ; Yes, ignore
+          cp        0x12                ; Ctrl-R
+          jr        z, reset
           cp        0xF9
           jp        z, pause
           jr        kspecial
@@ -126,15 +124,13 @@ bkrt:     ld        a, (lastarr)
 
           ds        0x0200-$
 
-          dw        badirq, badirq
-vkbirq:   dw        kbirq
-vvbirq:   dw        vbirq
-          dw        badirq, badirq, badirq, badirq
-
 lastjoy1: db        0x00
 lastjoy2: db        0x00
 lastkey:  db        0x00
 lastarr:  db        0x00
+
+vkbirq:   dw        kbirq
+vvbirq:   dw        vbirq
 
 vbirq:    push      hl
           push      de
@@ -162,9 +158,6 @@ vbirq:    push      hl
           pop       de
           pop       hl
           ei
-          reti
-
-badirq:   ei
           reti
 
 setup:    ld        hl, gamecode
@@ -485,6 +478,7 @@ splash8:  out       (0xA0), a
           or        a
           djnz      splash8
           ret
+          ds        2         ; roundoff
 
 nergal:   db        "    CONVERSION BY NERGALSOFT    ", 0
 
