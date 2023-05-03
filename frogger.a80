@@ -73,8 +73,8 @@ joy2:     in        a, (0x91)
           in        a, (0x90)
           ld        (lastjoy2), a
 exitirq:  pop       af
-          ei
-          ret
+badirq:   ei
+          reti
 
 kspecial: cp        0xE0
           jr        c, exitirq
@@ -128,13 +128,15 @@ bkrt:     ld        a, (lastarr)
 
           ds        0x0200-$
 
-lastjoy1: db        0x00                ; These 4 variables double for 2
-lastjoy2: db        0x00                ;   unused IRQ vectors.
-lastkey:  db        0x00
-lastarr:  db        0x00
-
+          dw        badirq, badirq
 vkbirq:   dw        kbirq
 vvbirq:   dw        vbirq
+          dw        badirq, badirq, badirq, badirq
+
+lastjoy1: db        0x00
+lastjoy2: db        0x00
+lastkey:  db        0x00
+lastarr:  db        0x00
 
 vbirq:    push      hl
           push      de
@@ -162,26 +164,22 @@ vbirq:    push      hl
           pop       de
           pop       hl
           ei
-          ret
+          reti
 
 setup:    ld        hl, gamecode
           ld        de, 0x4000          ; target address
           ld        bc, gamelen
           ldir                          ; will only work if file < 16128 bytes
           
-          ld        c, 0x41
           ld        a, 0x07             ; Enable write to port A via reg 7
-          out       (c), a
-          dec       c
-          in        a, (c)              ; Read current setting
-          or        c                   ; Optimization: C=$40
-          out       (c), a              ; Write it back with bit flipped on.
-          inc       c
+          out       (0x41), a
+          ld        a, 0x7F             ; Port A write, B read, all sound off
+          out       (0x40), a
           ld        a, 0x0E             ; Select port A.
-          out       (c), a
-          dec       c
+          out       (0x41), a
           ld        a, 0x30             ; VBLANK and keyboard only.
-          out       (c), a
+          out       (0x40), a
+
           ld        a, 0x02             ; Interrupt vector in page 0x02
           ld        i, a
           im        2
@@ -258,6 +256,16 @@ vdpatch7: inc       hl                  ; Tick down
           ld        (0x4609), hl
           ld        hl, joytran
           ld        (0x4038), hl
+
+; ----------------------------------------------------------------------------
+; Konami code sets port A to WRITABLE, this is the thing that should not be.
+; ----------------------------------------------------------------------------
+
+          ld        a, 0xE8
+          ld        (0x415D), a
+          ld        a, 0xF8
+          ld        (0x419C), a
+          ld        (0x41EF), a
 
 ; ============================================================================
 ; Done hacking; return to main code
