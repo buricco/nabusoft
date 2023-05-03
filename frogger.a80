@@ -5,6 +5,12 @@
 ;   Special thanks: productiondave, MacGyver75
 ; ============================================================================
 
+; ============================================================================
+; KNOWN UNKNOWNS:
+;   Why is the joystick choppy?  I'm reading it as fast as I can.
+;   LMK if you figure it out.
+; ============================================================================
+
           org       0x0100
 start:    ex        de, hl              ; These three instructions will be
           inc       bc                  ; interpreted on an x86 CPU as
